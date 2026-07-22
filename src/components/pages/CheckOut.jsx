@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { supabase } from '../lib/supabase';
-import { BarcodeReader } from '../components/BarcodeReader';
+import { supabase } from '../../lib/supabase';
+import { BarcodeReader } from '../BarcodeReader';
 
 export function CheckOut() {
   const [mostrarLeitor, setMostrarLeitor] = useState(false);

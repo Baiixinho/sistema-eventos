@@ -1,4 +1,4 @@
-import { CheckOut } from './pages/CheckOut';
+import { CheckOut } from "./components/pages/CheckOut";
 
 function App() {
   return (
