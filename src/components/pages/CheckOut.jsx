@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { BarcodeReader } from '../BarcodeReader';
+// Importação direta da imagem em src/assets/logo.jpeg
+import logoImg from '../assets/logo.jpeg'; 
 
 export function CheckOut() {
   const [eventos, setEventos] = useState([]);
@@ -214,10 +216,10 @@ export function CheckOut() {
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif' }}>
       
-      {/* Logotipo Oficial da Paulinho Produções (.jpeg) */}
+      {/* Logotipo Oficial da Paulinho Produções via Import */}
       <div style={{ textAlign: 'center', marginBottom: '10px' }}>
         <img 
-          src="/logo.jpeg" 
+          src={logoImg} 
           alt="Paulinho Produções" 
           style={{ height: '75px', maxWidth: '100%', objectFit: 'contain' }} 
         />
