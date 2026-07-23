@@ -66,7 +66,7 @@ export function Dashboard() {
   const [passoScan, setPassoScan] = useState(1); // 1: Ler Câmera, 2: Escolher Tipo/Preencher
   const [usarCamera, setUsarCamera] = useState(false);
   const [caseEmAcondicionamento, setCaseEmAcondicionamento] = useState(null);
-  
+
   const [novoEquipamento, setNovoEquipamento] = useState({
     nome: '',
     codigo_barras: '',
@@ -80,31 +80,50 @@ export function Dashboard() {
   const [mensagem, setMensagem] = useState('');
   const videoRef = useRef(null);
 
+  // Referências para evitar estado desatualizado no callback do scanner
+  const equipamentosRef = useRef(equipamentos);
+  const caseRef = useRef(caseEmAcondicionamento);
+
+  useEffect(() => {
+    equipamentosRef.current = equipamentos;
+  }, [equipamentos]);
+
+  useEffect(() => {
+    caseRef.current = caseEmAcondicionamento;
+  }, [caseEmAcondicionamento]);
+
   useEffect(() => {
     carregarDados();
   }, []);
 
   // Leitor de Câmera ZXing
   useEffect(() => {
-    let codeReader = null;
+    let controls = null;
 
     if (abaAtiva === 'equipamentos' && passoScan === 1 && usarCamera && videoRef.current) {
-      codeReader = new BrowserMultiFormatReader();
-      codeReader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
-        if (result) {
-          const cod = result.getText();
-          processarCodigoScaneado(cod);
-        }
-      });
+      const codeReader = new BrowserMultiFormatReader();
+
+      codeReader
+        .decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+          if (result) {
+            const cod = result.getText();
+            processarCodigoScaneado(cod);
+          }
+        })
+        .then((c) => {
+          controls = c;
+        })
+        .catch((err) => console.error('Erro na câmera:', err));
     }
 
     return () => {
-      if (codeReader) {
+      if (controls) {
+        controls.stop();
+      }
+      if (videoRef.current && videoRef.current.srcObject) {
         try {
-          const stream = videoRef.current?.srcObject;
-          if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-          }
+          const stream = videoRef.current.srcObject;
+          stream.getTracks().forEach((track) => track.stop());
         } catch (e) {}
       }
     };
@@ -181,8 +200,13 @@ export function Dashboard() {
     const codLimpo = codigo.trim();
     if (!codLimpo) return;
 
+    const listaEquipamentos = equipamentosRef.current;
+    const currentCase = caseRef.current;
+
     // Procura se já existe no banco
-    const itemExistente = equipamentos.find((eq) => eq.codigo_barras === codLimpo || eq.patrimonio === codLimpo);
+    const itemExistente = listaEquipamentos.find(
+      (eq) => eq.codigo_barras === codLimpo || eq.patrimonio === codLimpo
+    );
 
     if (itemExistente) {
       if (itemExistente.tipo === 'Case') {
@@ -208,7 +232,7 @@ export function Dashboard() {
         codigo_barras: codLimpo,
         patrimonio: codLimpo,
         tipo: 'Equipamento',
-        case_id: caseEmAcondicionamento ? caseEmAcondicionamento.id : '',
+        case_id: currentCase ? currentCase.id : '',
         condicao: 'Novo',
       });
       setUsarCamera(false); // Pausa a câmera para preencher os dados
@@ -344,7 +368,7 @@ export function Dashboard() {
             <span style={{ fontSize: '13px', color: '#0369a1', fontWeight: '500' }}>Eventos Ativos</span>
             <p style={{ fontSize: '30px', fontWeight: '700', margin: '8px 0 0 0', color: '#0284c7' }}>{estatisticas.eventosAtivos}</p>
           </div>
-          <div style={{ padding: '20px', backgroundColor: '#fffbebf', border: '1px solid #fef08a', borderRadius: '10px' }}>
+          <div style={{ padding: '20px', backgroundColor: '#fffbeb', border: '1px solid #fef08a', borderRadius: '10px' }}>
             <span style={{ fontSize: '13px', color: '#854d0e', fontWeight: '500' }}>Programados</span>
             <p style={{ fontSize: '30px', fontWeight: '700', margin: '8px 0 0 0', color: '#ca8a04' }}>{estatisticas.eventosProgramados}</p>
           </div>
