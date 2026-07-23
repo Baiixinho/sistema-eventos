@@ -43,14 +43,21 @@ export function Login() {
   const [erro, setErro] = useState('');
   const navigate = useNavigate();
 
-  // Altere o PIN padrão abaixo se desejar
-  const PIN_CORRETO = '1234'; 
+  // Configuração dos PINs de Acesso
+  const PIN_OPERADOR = '1234';
+  const PIN_GESTOR = '9999';
 
   const handleLogin = (e) => {
     e.preventDefault();
-    if (pin === PIN_CORRETO) {
+
+    if (pin === PIN_OPERADOR) {
       localStorage.setItem('autenticado', 'true');
+      localStorage.setItem('perfil', 'operador');
       navigate('/checkout');
+    } else if (pin === PIN_GESTOR) {
+      localStorage.setItem('autenticado', 'true');
+      localStorage.setItem('perfil', 'gestor');
+      navigate('/dashboard');
     } else {
       setErro('PIN incorreto. Tente novamente.');
       setPin('');
@@ -63,15 +70,15 @@ export function Login() {
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: '100vh',
-      backgroundColor: '#f8fafc',
+      backgroundColor: '#000000', // 👈 Fundo preto
       padding: '20px',
       fontFamily: 'sans-serif'
     }}>
       <div style={{
-        backgroundColor: 'white',
+        backgroundColor: '#ffffff',
         padding: '30px',
         borderRadius: '12px',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+        boxShadow: '0 10px 25px -5px rgba(255, 255, 255, 0.1)',
         width: '100%',
         maxWidth: '360px'
       }}>
