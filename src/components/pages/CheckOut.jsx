@@ -43,6 +43,15 @@ export function CheckOut() {
       return;
     }
 
+    const codigoLimpo = codigo.trim();
+
+    // 🔒 TRAVA 1: Impede bipar o mesmo código duas vezes na lista atual
+    const jaNaLista = itensBipados.some(item => item.codigo === codigoLimpo);
+    if (jaNaLista) {
+      setMensagemErro(`⚠️ O Patrimônio "${codigoLimpo}" já foi bipado neste lote!`);
+      return;
+    }
+
     setCarregando(true);
 
     try {
@@ -50,11 +59,11 @@ export function CheckOut() {
       const { data: equipamento, error: erroBusca } = await supabase
         .from('equipamentos')
         .select('*')
-        .eq('codigo_barras', codigo)
+        .eq('codigo_barras', codigoLimpo)
         .single();
 
       if (erroBusca || !equipamento) {
-        setMensagemErro(`Item com código "${codigo}" não cadastrado no estoque.`);
+        setMensagemErro(`Item com código "${codigoLimpo}" não cadastrado no estoque.`);
         setCarregando(false);
         return;
       }
@@ -70,7 +79,7 @@ export function CheckOut() {
       if (erroAtualizacao) throw erroAtualizacao;
 
       // 3. Grava histórico na tabela de movimentações
-      const { error: erroHistorico } = await supabase
+      const { data: movimentacao, error: erroHistorico } = await supabase
         .from('movimentacoes')
         .insert([
           {
@@ -78,17 +87,22 @@ export function CheckOut() {
             tipo: tipoOperacao,
             evento: eventoSelecionado
           }
-        ]);
+        ])
+        .select()
+        .single();
 
       if (erroHistorico) throw erroHistorico;
 
       // Trava os seletores no 1º bipe para garantir segurança do lote
       setOperacaoIniciada(true);
 
-      // Adiciona na lista de itens bipados na sessão atual
+      // Adiciona na lista de itens bipados na sessão atual (guardando IDs para permitir remoção)
       const novoItem = {
+        equipamento_id: equipamento.id,
+        movimentacao_id: movimentacao?.id,
         nome: equipamento.nome,
-        codigo,
+        codigo: codigoLimpo,
+        statusAnterior: equipamento.status,
         hora: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
       setItensBipados((prev) => [novoItem, ...prev]);
@@ -98,6 +112,48 @@ export function CheckOut() {
     } catch (err) {
       console.error(err);
       setMensagemErro('Erro ao salvar movimentação. Tente novamente.');
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  // 🗑️ REMOÇÃO DE ITEM COM REGISTRO DE AUDITORIA
+  const handleRemoverItem = async (itemParaRemover) => {
+    setMensagemErro('');
+    setMensagemSucesso('');
+    setCarregando(true);
+
+    try {
+      // 1. Restaura o status original do equipamento
+      await supabase
+        .from('equipamentos')
+        .update({ status: itemParaRemover.statusAnterior || 'Disponível' })
+        .eq('id', itemParaRemover.equipamento_id);
+
+      // 2. Registra o log de auditoria da remoção
+      await supabase
+        .from('movimentacoes')
+        .insert([
+          {
+            equipamento_id: itemParaRemover.equipamento_id,
+            tipo: 'REMOVIDO_OPERADOR',
+            evento: eventoSelecionado
+          }
+        ]);
+
+      // 3. Remove o item da lista visual do operador
+      const novaLista = itensBipados.filter(item => item.codigo !== itemParaRemover.codigo);
+      setItensBipados(novaLista);
+
+      // Se a lista esvaziar, destrava os seletores
+      if (novaLista.length === 0) {
+        setOperacaoIniciada(false);
+      }
+
+      setMensagemSucesso(`🗑️ Item "${itemParaRemover.nome}" foi removido do lote (registro salvo no histórico).`);
+    } catch (err) {
+      console.error(err);
+      setMensagemErro('Erro ao remover o item. Tente novamente.');
     } finally {
       setCarregando(false);
     }
@@ -119,7 +175,7 @@ export function CheckOut() {
 
       {/* Trava visual indicando lote em andamento */}
       {operacaoIniciada && (
-        <div style={{ backgroundColor: '#fef3c7', color: '#92400e', padding: '10px', borderRadius: '8px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ backgroundColor: '#fef3c7', color: '#92400e', padding: '10px 15px', borderRadius: '8px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>🔒 Lote em andamento ({itensBipados.length} itens)</span>
           <button
             onClick={resetarOperacao}
@@ -260,13 +316,13 @@ export function CheckOut() {
 
       {/* Alertas */}
       {mensagemErro && (
-        <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '12px', borderRadius: '8px', marginTop: '15px' }}>
+        <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '12px', borderRadius: '8px', marginTop: '15px', fontWeight: '500' }}>
           {mensagemErro}
         </div>
       )}
 
       {mensagemSucesso && (
-        <div style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', marginTop: '15px' }}>
+        <div style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', marginTop: '15px', fontWeight: '500' }}>
           {mensagemSucesso}
         </div>
       )}
@@ -280,20 +336,37 @@ export function CheckOut() {
               <li
                 key={index}
                 style={{
-                  padding: '10px',
+                  padding: '10px 14px',
                   backgroundColor: '#f9fafb',
                   border: '1px solid #e5e7eb',
                   borderRadius: '6px',
                   marginBottom: '8px',
                   display: 'flex',
-                  justify: 'space-between'
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
                 }}
               >
                 <div>
                   <strong>{item.nome}</strong>
-                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Cód: {item.codigo}</div>
+                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Cód: {item.codigo} • {item.hora}</div>
                 </div>
-                <span style={{ fontSize: '12px', color: '#9ca3af' }}>{item.hora}</span>
+
+                {/* Botão de Remover com Auditoria */}
+                <button
+                  onClick={() => handleRemoverItem(item)}
+                  style={{
+                    backgroundColor: '#fee2e2',
+                    color: '#dc2626',
+                    border: '1px solid #fca5a5',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🗑️ Remover
+                </button>
               </li>
             ))}
           </ul>
