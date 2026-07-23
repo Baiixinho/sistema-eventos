@@ -61,7 +61,9 @@ export function Dashboard() {
     data_inicio: '',
   });
 
-  // Form Equipamentos (Atualizado com Patrimônio e Case)
+  // Form Equipamentos (Atualizado com Fluxo "Scan First")
+  const [passoScan, setPassoScan] = useState(1); // 1: Ler código, 2: Escolher Tipo, 3: Preencher Dados
+  const [caseEmModoAcondicionamento, setCaseEmModoAcondicionamento] = useState(null); // Armazena o Case ativo
   const [novoEquipamento, setNovoEquipamento] = useState({
     nome: '',
     codigo_barras: '',
@@ -115,7 +117,7 @@ export function Dashboard() {
       setEventos(evData);
 
       const hoje = new Date().toISOString().split('T')[0];
-      
+
       const ativos = evData.filter(
         (e) => e.status !== 'finalizado' && e.data_inicio <= hoje
       ).length;
@@ -157,7 +159,50 @@ export function Dashboard() {
     }
   }
 
-  // Cadastrar Equipamento (Atualizado com validação de patrimônio e suporte a Case)
+  // Passo 1: Processar Leitura do Código de Barras / QR Code
+  function handleLerCodigo(e) {
+    e.preventDefault();
+    if (!novoEquipamento.codigo_barras.trim()) return;
+
+    // Verifica se o código já está cadastrado no sistema
+    const itemExistente = equipamentos.find(
+      (eq) => eq.codigo_barras === novoEquipamento.codigo_barras
+    );
+
+    if (itemExistente) {
+      // Se for um Case existente, abre o modo de acondicionamento para adicionar itens nele
+      if (itemExistente.tipo === 'Case') {
+        setCaseEmModoAcondicionamento(itemExistente);
+        setNovoEquipamento({
+          nome: '',
+          codigo_barras: '',
+          patrimonio: '',
+          tipo: 'Equipamento',
+          case_id: itemExistente.id,
+          condicao: 'Novo',
+        });
+        setPassoScan(1);
+        setMensagem(`Case "${itemExistente.nome}" selecionado! Agora escaneie os equipamentos para colocá-lo dentro.`);
+      } else {
+        setMensagem(`Aviso: O código "${novoEquipamento.codigo_barras}" já pertence ao item: ${itemExistente.nome}`);
+      }
+    } else {
+      // Código novo -> Avança para seleção do Tipo
+      setPassoScan(2);
+    }
+  }
+
+  // Passo 2: Definir se é Case ou Equipamento
+  function handleSelecionarTipo(tipo) {
+    setNovoEquipamento((prev) => ({
+      ...prev,
+      tipo,
+      case_id: tipo === 'Equipamento' && caseEmModoAcondicionamento ? caseEmModoAcondicionamento.id : prev.case_id,
+    }));
+    setPassoScan(3);
+  }
+
+  // Passo 3: Cadastrar Equipamento/Case no Banco
   async function handleCriarEquipamento(e) {
     e.preventDefault();
     if (!novoEquipamento.nome.trim() || !novoEquipamento.codigo_barras.trim()) return;
@@ -178,18 +223,29 @@ export function Dashboard() {
       status: 'Disponível',
     };
 
-    const { error } = await supabase.from('equipamentos').insert([payload]);
+    const { data, error } = await supabase.from('equipamentos').insert([payload]).select();
 
     if (!error) {
-      setMensagem('Item cadastrado com sucesso!');
+      const itemSalvo = data ? data[0] : null;
+
+      // Se acabamos de cadastrar um NOVO CASE, entra direto no modo de acondicionamento dele!
+      if (novoEquipamento.tipo === 'Case' && itemSalvo) {
+        setCaseEmModoAcondicionamento(itemSalvo);
+        setMensagem(`Case "${itemSalvo.nome}" cadastrado! Agora escaneie os equipamentos para este Case.`);
+      } else {
+        setMensagem('Item cadastrado com sucesso!');
+      }
+
+      // Reinicia os dados para o próximo scan
       setNovoEquipamento({
         nome: '',
         codigo_barras: '',
         patrimonio: '',
         tipo: 'Equipamento',
-        case_id: '',
+        case_id: caseEmModoAcondicionamento ? caseEmModoAcondicionamento.id : '',
         condicao: 'Novo',
       });
+      setPassoScan(1);
       carregarDados();
     } else {
       setMensagem('Erro: Código de barras ou patrimônio pode já existir.');
@@ -504,74 +560,155 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ABA 3: EQUIPAMENTOS (SEÇÃO ALTERADA) */}
+      {/* ABA 3: EQUIPAMENTOS (FLUXO "SCAN FIRST" INTERATIVO) */}
       {abaAtiva === 'equipamentos' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div style={{ padding: '20px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
-              Cadastrar Novo Item (Equipamento / Case)
-            </h3>
-            <form onSubmit={handleCriarEquipamento} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <input
-                type="text"
-                placeholder="Nome do Item (ex: Caixa RCF / Case Perfil 01)"
-                value={novoEquipamento.nome}
-                onChange={(e) => setNovoEquipamento({ ...novoEquipamento, nome: e.target.value })}
-                style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', gridColumn: 'span 2' }}
-                required
-              />
-              
-              <input
-                type="text"
-                placeholder="Código de Barras"
-                value={novoEquipamento.codigo_barras}
-                onChange={(e) => setNovoEquipamento({ ...novoEquipamento, codigo_barras: e.target.value })}
-                style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
-                required
-              />
-
-              <input
-                type="text"
-                placeholder="Patrimônio (5 dígitos, ex: 12345)"
-                value={novoEquipamento.patrimonio}
-                maxLength={5}
-                onChange={(e) => setNovoEquipamento({ ...novoEquipamento, patrimonio: e.target.value.replace(/\D/g, '') })}
-                style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
-              />
-
-              <select
-                value={novoEquipamento.tipo}
-                onChange={(e) => setNovoEquipamento({ ...novoEquipamento, tipo: e.target.value, case_id: '' })}
-                style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
-              >
-                <option value="Equipamento">Tipo: Equipamento</option>
-                <option value="Case">Tipo: Case (Maleta/Rack)</option>
-              </select>
-
-              {novoEquipamento.tipo === 'Equipamento' && (
-                <select
-                  value={novoEquipamento.case_id}
-                  onChange={(e) => setNovoEquipamento({ ...novoEquipamento, case_id: e.target.value })}
-                  style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
-                >
-                  <option value="">Sem Case (Avulso)</option>
-                  {casesDisponiveis.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      Vincular ao Case: {c.nome} {c.patrimonio ? `[${c.patrimonio}]` : ''}
-                    </option>
-                  ))}
-                </select>
-              )}
-
+          
+          {/* Banner de Modo de Acondicionamento (Case Ativo) */}
+          {caseEmModoAcondicionamento && (
+            <div style={{ padding: '14px 18px', backgroundColor: '#e0f2fe', border: '1px solid #7dd3fc', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <span style={{ fontSize: '12px', color: '#0369a1', fontWeight: 'bold', textTransform: 'uppercase' }}>🧳 Modo de Acondicionamento Ativo</span>
+                <h4 style={{ margin: '2px 0 0 0', color: '#0c4a6e', fontSize: '15px' }}>
+                  Acondicionando no Case: <strong>{caseEmModoAcondicionamento.nome}</strong> {caseEmModoAcondicionamento.patrimonio ? `[PAT: #${caseEmModoAcondicionamento.patrimonio}]` : ''}
+                </h4>
+              </div>
               <button
-                type="submit"
-                style={{ gridColumn: 'span 2', backgroundColor: '#0284c7', color: 'white', padding: '10px', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
+                onClick={() => {
+                  setCaseEmModoAcondicionamento(null);
+                  setNovoEquipamento((prev) => ({ ...prev, case_id: '' }));
+                }}
+                style={{ backgroundColor: '#0284c7', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
               >
-                Salvar Item
+                Concluir Case
               </button>
-            </form>
+            </div>
+          )}
+
+          {/* Painel do Fluxo de Cadastro */}
+          <div style={{ padding: '20px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
+            
+            {/* PASSO 1: LEITURA DO CÓDIGO */}
+            {passoScan === 1 && (
+              <div>
+                <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
+                  📷 Passo 1: Escanear / Digitar Código
+                </h3>
+                <form onSubmit={handleLerCodigo} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    placeholder="Escaneie o código de barras ou QR Code..."
+                    value={novoEquipamento.codigo_barras}
+                    onChange={(e) => setNovoEquipamento({ ...novoEquipamento, codigo_barras: e.target.value })}
+                    style={{ flex: 1, padding: '12px 14px', borderRadius: '6px', border: '2px solid #0284c7', fontSize: '15px', fontWeight: '500' }}
+                    autoFocus
+                    required
+                  />
+                  <button
+                    type="submit"
+                    style={{ backgroundColor: '#0284c7', color: 'white', padding: '12px 24px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+                  >
+                    Avançar ➔
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* PASSO 2: SELEÇÃO DE TIPO (CASE OU EQUIPAMENTO) */}
+            {passoScan === 2 && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
+                    🟢 Código Lido: <span style={{ color: '#0284c7' }}>#{novoEquipamento.codigo_barras}</span>
+                  </h3>
+                  <button onClick={() => setPassoScan(1)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '13px' }}>
+                    ← Voltar
+                  </button>
+                </div>
+                <p style={{ fontSize: '14px', color: '#475569', marginBottom: '16px' }}>
+                  O que é este item que você acabou de escanear?
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelecionarTipo('Case')}
+                    style={{ padding: '20px', borderRadius: '8px', border: '2px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}
+                  >
+                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>🧳</div>
+                    <strong style={{ display: 'block', fontSize: '16px', color: '#0f172a' }}>É um Case</strong>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>Maleta, Rack ou Caixa que guarda outros itens.</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelecionarTipo('Equipamento')}
+                    style={{ padding: '20px', borderRadius: '8px', border: '2px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}
+                  >
+                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>🔌</div>
+                    <strong style={{ display: 'block', fontSize: '16px', color: '#0f172a' }}>É um Equipamento</strong>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>Microfone, Caixa de som, Cabo, iluminação, etc.</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* PASSO 3: FORMULÁRIO DE PREENCHIMENTO */}
+            {passoScan === 3 && (
+              <form onSubmit={handleCriarEquipamento} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
+                    📝 Cadastrar {novoEquipamento.tipo}: <span style={{ color: '#0284c7' }}>#{novoEquipamento.codigo_barras}</span>
+                  </h3>
+                  <button type="button" onClick={() => setPassoScan(2)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '13px' }}>
+                    ← Alterar Tipo
+                  </button>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder={novoEquipamento.tipo === 'Case' ? "Nome do Case (ex: Case Mics Shure #01)" : "Nome do Equipamento (ex: Microfone Shure SM58)"}
+                  value={novoEquipamento.nome}
+                  onChange={(e) => setNovoEquipamento({ ...novoEquipamento, nome: e.target.value })}
+                  style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', gridColumn: 'span 2' }}
+                  autoFocus
+                  required
+                />
+
+                <input
+                  type="text"
+                  placeholder="Patrimônio (5 dígitos, ex: 12345)"
+                  value={novoEquipamento.patrimonio}
+                  maxLength={5}
+                  onChange={(e) => setNovoEquipamento({ ...novoEquipamento, patrimonio: e.target.value.replace(/\D/g, '') })}
+                  style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                />
+
+                {novoEquipamento.tipo === 'Equipamento' && (
+                  <select
+                    value={novoEquipamento.case_id}
+                    onChange={(e) => setNovoEquipamento({ ...novoEquipamento, case_id: e.target.value })}
+                    style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  >
+                    <option value="">Sem Case (Avulso)</option>
+                    {casesDisponiveis.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        Vincular ao Case: {c.nome} {c.patrimonio ? `[${c.patrimonio}]` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <button
+                  type="submit"
+                  style={{ gridColumn: 'span 2', backgroundColor: '#0284c7', color: 'white', padding: '12px', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '14px', cursor: 'pointer', marginTop: '8px' }}
+                >
+                  Salvar {novoEquipamento.tipo} e Continuar
+                </button>
+              </form>
+            )}
           </div>
 
+          {/* LISTA DE ESTOQUE CADASTRADO */}
           <div>
             <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
               Estoque Cadastrado ({equipamentos.length})
