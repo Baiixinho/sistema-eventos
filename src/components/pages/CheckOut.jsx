@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { BarcodeReader } from '../BarcodeReader';
 
@@ -7,16 +7,49 @@ export function CheckOut() {
   const [eventoSelecionado, setEventoSelecionado] = useState('');
   const [tipoOperacao, setTipoOperacao] = useState('saida'); // 'saida' ou 'entrada'
   
-  // Controle de Trava de Segurança
+  // Controle de Trava de Segurança e Leitor Continuo
   const [operacaoIniciada, setOperacaoIniciada] = useState(false);
-
   const [mostrarLeitor, setMostrarLeitor] = useState(false);
   const [carregando, setCarregando] = useState(false);
+  
   const [mensagemSucesso, setMensagemSucesso] = useState('');
   const [mensagemErro, setMensagemErro] = useState('');
   const [itensBipados, setItensBipados] = useState([]);
 
-  // Busca eventos ativos no Supabase ao carregar a tela
+  // Ref para evitar leituras múltiplas consecutivas do mesmo código em milissegundos
+  const processandoRef = useRef(false);
+
+  // 🔊 GERADOR DE SOM (Web Audio API)
+  const tocarSomBipe = (tipo = 'sucesso') => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      if (tipo === 'sucesso') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1200, ctx.currentTime); // Som agudo (Bipe bom)
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.12);
+      } else {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(300, ctx.currentTime); // Som grave (Erro/Alerta)
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+      }
+    } catch (e) {
+      console.log('Audio API não suportada ou bloqueada pelo navegador.');
+    }
+  };
+
+  // Busca eventos ativos no Supabase ao carregar
   useEffect(() => {
     async function carregarEventos() {
       const { data, error } = await supabase
@@ -34,21 +67,29 @@ export function CheckOut() {
   }, []);
 
   const handleCodigoLido = async (codigo) => {
-    setMostrarLeitor(false);
+    // Evita ler múltiplos códigos de uma vez só se a câmera continuar sobre a etiqueta
+    if (processandoRef.current) return;
+    processandoRef.current = true;
+
     setMensagemErro('');
     setMensagemSucesso('');
 
     if (!eventoSelecionado) {
+      tocarSomBipe('erro');
       setMensagemErro('Selecione um evento antes de bipar!');
+      setTimeout(() => { processandoRef.current = false; }, 1500);
       return;
     }
 
     const codigoLimpo = codigo.trim();
 
-    // 🔒 TRAVA 1: Impede bipar o mesmo código duas vezes na lista atual
+    // 🔒 TRAVA DE DUPLICIDADE
     const jaNaLista = itensBipados.some(item => item.codigo === codigoLimpo);
     if (jaNaLista) {
-      setMensagemErro(`⚠️ O Patrimônio "${codigoLimpo}" já foi bipado neste lote!`);
+      tocarSomBipe('erro');
+      setMensagemErro(`⚠️ O Patrimônio "${codigoLimpo}" já está nesta lista!`);
+      // Pausa de 2s para não ficar bipando o erro sem parar
+      setTimeout(() => { processandoRef.current = false; }, 2000);
       return;
     }
 
@@ -63,14 +104,15 @@ export function CheckOut() {
         .single();
 
       if (erroBusca || !equipamento) {
-        setMensagemErro(`Item com código "${codigoLimpo}" não cadastrado no estoque.`);
-        setCarregando(false);
+        tocarSomBipe('erro');
+        setMensagemErro(`❌ Item com código "${codigoLimpo}" não cadastrado.`);
+        setTimeout(() => { processandoRef.current = false; }, 2000);
         return;
       }
 
       const novoStatus = tipoOperacao === 'saida' ? 'Em Uso' : 'Disponível';
 
-      // 2. Atualiza status na tabela de equipamentos
+      // 2. Atualiza status no banco
       const { error: erroAtualizacao } = await supabase
         .from('equipamentos')
         .update({ status: novoStatus })
@@ -78,7 +120,7 @@ export function CheckOut() {
 
       if (erroAtualizacao) throw erroAtualizacao;
 
-      // 3. Grava histórico na tabela de movimentações
+      // 3. Grava histórico na tabela
       const { data: movimentacao, error: erroHistorico } = await supabase
         .from('movimentacoes')
         .insert([
@@ -93,10 +135,11 @@ export function CheckOut() {
 
       if (erroHistorico) throw erroHistorico;
 
-      // Trava os seletores no 1º bipe para garantir segurança do lote
+      // 🔔 TOCA BIPE DE SUCESSO!
+      tocarSomBipe('sucesso');
+
       setOperacaoIniciada(true);
 
-      // Adiciona na lista de itens bipados na sessão atual (guardando IDs para permitir remoção)
       const novoItem = {
         equipamento_id: equipamento.id,
         movimentacao_id: movimentacao?.id,
@@ -105,32 +148,35 @@ export function CheckOut() {
         statusAnterior: equipamento.status,
         hora: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
-      setItensBipados((prev) => [novoItem, ...prev]);
 
-      setMensagemSucesso(`✅ "${equipamento.nome}" registrado com sucesso!`);
+      setItensBipados((prev) => [novoItem, ...prev]);
+      setMensagemSucesso(`✅ "${equipamento.nome}" bipado com sucesso!`);
 
     } catch (err) {
       console.error(err);
-      setMensagemErro('Erro ao salvar movimentação. Tente novamente.');
+      tocarSomBipe('erro');
+      setMensagemErro('Erro ao salvar movimentação no Supabase.');
     } finally {
       setCarregando(false);
+      // Aguarda 1.5 segundo antes de liberar a câmera para o próximo item
+      setTimeout(() => {
+        processandoRef.current = false;
+      }, 1500);
     }
   };
 
-  // 🗑️ REMOÇÃO DE ITEM COM REGISTRO DE AUDITORIA
+  // REMOÇÃO DE ITEM COM HISTÓRICO
   const handleRemoverItem = async (itemParaRemover) => {
     setMensagemErro('');
     setMensagemSucesso('');
     setCarregando(true);
 
     try {
-      // 1. Restaura o status original do equipamento
       await supabase
         .from('equipamentos')
         .update({ status: itemParaRemover.statusAnterior || 'Disponível' })
         .eq('id', itemParaRemover.equipamento_id);
 
-      // 2. Registra o log de auditoria da remoção
       await supabase
         .from('movimentacoes')
         .insert([
@@ -141,19 +187,19 @@ export function CheckOut() {
           }
         ]);
 
-      // 3. Remove o item da lista visual do operador
       const novaLista = itensBipados.filter(item => item.codigo !== itemParaRemover.codigo);
       setItensBipados(novaLista);
 
-      // Se a lista esvaziar, destrava os seletores
       if (novaLista.length === 0) {
         setOperacaoIniciada(false);
       }
 
-      setMensagemSucesso(`🗑️ Item "${itemParaRemover.nome}" foi removido do lote (registro salvo no histórico).`);
+      tocarSomBipe('sucesso');
+      setMensagemSucesso(`🗑️ Item "${itemParaRemover.nome}" removido da lista.`);
     } catch (err) {
       console.error(err);
-      setMensagemErro('Erro ao remover o item. Tente novamente.');
+      tocarSomBipe('erro');
+      setMensagemErro('Erro ao remover o item.');
     } finally {
       setCarregando(false);
     }
@@ -164,16 +210,18 @@ export function CheckOut() {
     setItensBipados([]);
     setMensagemSucesso('');
     setMensagemErro('');
+    setMostrarLeitor(false);
   };
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif' }}>
-      <h1 style={{ textAlign: 'center', marginBottom: '5px' }}>Galpão - Bipador</h1>
-      <p style={{ textAlign: 'center', color: '#666', marginBottom: '20px' }}>
-        Controle de Entrada e Saída
+      {/* 1. MUDANÇA DO TÍTULO */}
+      <h1 style={{ textAlign: 'center', marginBottom: '5px', color: '#1e293b' }}>Montagem de Evento</h1>
+      <p style={{ textAlign: 'center', color: '#64748b', marginBottom: '20px' }}>
+        Conferência contínua de Saída e Entrada
       </p>
 
-      {/* Trava visual indicando lote em andamento */}
+      {/* Trava de lote */}
       {operacaoIniciada && (
         <div style={{ backgroundColor: '#fef3c7', color: '#92400e', padding: '10px 15px', borderRadius: '8px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>🔒 Lote em andamento ({itensBipados.length} itens)</span>
@@ -181,7 +229,7 @@ export function CheckOut() {
             onClick={resetarOperacao}
             style={{ backgroundColor: '#d97706', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
           >
-            Concluir / Trocar
+            Concluir Lote
           </button>
         </div>
       )}
@@ -227,9 +275,9 @@ export function CheckOut() {
         </button>
       </div>
 
-      {/* Seleção do Evento (Dropdown do Banco) */}
+      {/* Evento */}
       <div style={{ marginBottom: '20px' }}>
-        <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px' }}>
+        <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', color: '#334155' }}>
           Evento / Cliente Destino:
         </label>
         <select
@@ -241,9 +289,8 @@ export function CheckOut() {
             padding: '12px',
             fontSize: '16px',
             borderRadius: '8px',
-            border: '1px solid #ccc',
-            backgroundColor: operacaoIniciada ? '#e5e7eb' : 'white',
-            cursor: operacaoIniciada ? 'not-allowed' : 'pointer'
+            border: '1px solid #cbd5e1',
+            backgroundColor: operacaoIniciada ? '#e2e8f0' : 'white'
           }}
         >
           {eventos.length === 0 ? (
@@ -258,12 +305,13 @@ export function CheckOut() {
         </select>
       </div>
 
-      {/* Botão de Câmera */}
-      {!mostrarLeitor && (
+      {/* Botão para Ligar Câmera */}
+      {!mostrarLeitor ? (
         <button
           onClick={() => {
             if (!eventoSelecionado) {
-              setMensagemErro('Selecione um evento cadastrado no sistema.');
+              setMensagemErro('Selecione um evento cadastrado.');
+              tocarSomBipe('erro');
               return;
             }
             setMensagemErro('');
@@ -272,7 +320,7 @@ export function CheckOut() {
           style={{
             backgroundColor: tipoOperacao === 'saida' ? '#dc2626' : '#16a34a',
             color: 'white',
-            padding: '14px',
+            padding: '16px',
             fontSize: '18px',
             fontWeight: 'bold',
             border: 'none',
@@ -281,55 +329,55 @@ export function CheckOut() {
             width: '100%'
           }}
         >
-          📷 Bipar Item para {tipoOperacao === 'saida' ? 'Saída' : 'Entrada'}
+          📷 Abrir Câmera Contínua ({tipoOperacao.toUpperCase()})
         </button>
-      )}
-
-      {/* Leitor da Câmera */}
-      {mostrarLeitor && (
-        <div style={{ marginTop: '15px' }}>
+      ) : (
+        <div style={{ marginTop: '10px' }}>
+          {/* CÂMERA MANTÉM-SE ATIVA AQUI */}
           <BarcodeReader onScanSuccess={handleCodigoLido} />
+          
           <button
             onClick={() => setMostrarLeitor(false)}
             style={{
-              marginTop: '15px',
-              backgroundColor: '#6b7280',
+              marginTop: '10px',
+              backgroundColor: '#475569',
               color: 'white',
-              padding: '10px',
+              padding: '12px',
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
-              width: '100%'
+              width: '100%',
+              fontWeight: 'bold'
             }}
           >
-            Fechar Câmera
+            ⏹️ Pausar Câmera
           </button>
         </div>
       )}
 
-      {/* Indicador de carregamento */}
+      {/* Indicadores */}
       {carregando && (
         <p style={{ textAlign: 'center', color: '#2563eb', fontWeight: 'bold', marginTop: '15px' }}>
-          🔍 Processando no Supabase...
+          🔄 Gravando no banco...
         </p>
       )}
 
-      {/* Alertas */}
+      {/* Alertas com Som */}
       {mensagemErro && (
-        <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '12px', borderRadius: '8px', marginTop: '15px', fontWeight: '500' }}>
+        <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '12px', borderRadius: '8px', marginTop: '15px', fontWeight: 'bold' }}>
           {mensagemErro}
         </div>
       )}
 
       {mensagemSucesso && (
-        <div style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', marginTop: '15px', fontWeight: '500' }}>
+        <div style={{ backgroundColor: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', marginTop: '15px', fontWeight: 'bold' }}>
           {mensagemSucesso}
         </div>
       )}
 
-      {/* Lista do Lote Atual Bipado */}
+      {/* Lista de Itens */}
       {itensBipados.length > 0 && (
-        <div style={{ marginTop: '25px', borderTop: '2px solid #eee', paddingTop: '15px' }}>
+        <div style={{ marginTop: '25px', borderTop: '2px solid #e2e8f0', paddingTop: '15px' }}>
           <h3>Itens Processados Neste Lote ({itensBipados.length}):</h3>
           <ul style={{ listStyleType: 'none', padding: 0 }}>
             {itensBipados.map((item, index) => (
@@ -337,8 +385,8 @@ export function CheckOut() {
                 key={index}
                 style={{
                   padding: '10px 14px',
-                  backgroundColor: '#f9fafb',
-                  border: '1px solid #e5e7eb',
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #e2e8f0',
                   borderRadius: '6px',
                   marginBottom: '8px',
                   display: 'flex',
@@ -348,10 +396,9 @@ export function CheckOut() {
               >
                 <div>
                   <strong>{item.nome}</strong>
-                  <div style={{ fontSize: '12px', color: '#6b7280' }}>Cód: {item.codigo} • {item.hora}</div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Cód: {item.codigo} • {item.hora}</div>
                 </div>
 
-                {/* Botão de Remover com Auditoria */}
                 <button
                   onClick={() => handleRemoverItem(item)}
                   style={{
