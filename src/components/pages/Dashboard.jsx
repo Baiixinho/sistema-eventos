@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { supabase } from '../../lib/supabase';
 
-// Componente de Logo Reutilizável
 export function LogoPaulinho() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -80,7 +79,10 @@ export function Dashboard() {
   const [mensagem, setMensagem] = useState('');
   const videoRef = useRef(null);
 
-  // Referências para evitar estado desatualizado no callback do scanner
+  // Trava para evitar leituras duplas simultâneas (debounce/lock)
+  const isProcessingRef = useRef(false);
+
+  // Referências para evitar estado desatualizado
   const equipamentosRef = useRef(equipamentos);
   const caseRef = useRef(caseEmAcondicionamento);
 
@@ -96,7 +98,7 @@ export function Dashboard() {
     carregarDados();
   }, []);
 
-  // Leitor de Câmera ZXing
+  // Leitor de Câmera ZXing com trava de debounce
   useEffect(() => {
     let controls = null;
 
@@ -105,7 +107,7 @@ export function Dashboard() {
 
       codeReader
         .decodeFromVideoDevice(undefined, videoRef.current, (result) => {
-          if (result) {
+          if (result && !isProcessingRef.current) {
             const cod = result.getText();
             processarCodigoScaneado(cod);
           }
@@ -195,22 +197,29 @@ export function Dashboard() {
     }
   }
 
-  // Lógica principal do Scan First
+  // Lógica de Processamento do Código de Barras
   function processarCodigoScaneado(codigo) {
-    const codLimpo = codigo.trim();
+    if (isProcessingRef.current) return;
+    
+    // Limpa espaços, caracteres de nova linha (Enter do leitor) e símbolos invisíveis
+    const codLimpo = codigo ? codigo.trim().replace(/[\r\n]+/g, '') : '';
     if (!codLimpo) return;
+
+    // Ativa a trava de leitura
+    isProcessingRef.current = true;
 
     const listaEquipamentos = equipamentosRef.current;
     const currentCase = caseRef.current;
 
-    // Procura se já existe no banco
+    // Procura se já existe no banco (compara string exata)
     const itemExistente = listaEquipamentos.find(
-      (eq) => eq.codigo_barras === codLimpo || eq.patrimonio === codLimpo
+      (eq) =>
+        String(eq.codigo_barras).trim() === codLimpo ||
+        String(eq.patrimonio).trim() === codLimpo
     );
 
     if (itemExistente) {
       if (itemExistente.tipo === 'Case') {
-        // Se escaneou um Case existente, abre o modo de colocar itens nele
         setCaseEmAcondicionamento(itemExistente);
         setNovoEquipamento({
           nome: '',
@@ -223,10 +232,15 @@ export function Dashboard() {
         setPassoScan(1);
         setMensagem(`Case "${itemExistente.nome}" selecionado! Agora escaneie os itens para ele.`);
       } else {
-        setMensagem(`Aviso: Código/Patrimônio "${codLimpo}" já está cadastrado em: ${itemExistente.nome}`);
+        setMensagem(`⚠️ Código/Patrimônio #${codLimpo} já está cadastrado no item: ${itemExistente.nome}`);
       }
+
+      // Libera a trava após 1.5s
+      setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 1500);
     } else {
-      // É um novo código: Define automaticamente como código e patrimônio
+      // Novo código detectado
       setNovoEquipamento({
         nome: '',
         codigo_barras: codLimpo,
@@ -235,8 +249,13 @@ export function Dashboard() {
         case_id: currentCase ? currentCase.id : '',
         condicao: 'Novo',
       });
-      setUsarCamera(false); // Pausa a câmera para preencher os dados
-      setPassoScan(2); // Vai para a escolha do tipo e nome
+      setUsarCamera(false);
+      setPassoScan(2);
+
+      // Libera a trava
+      setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 1000);
     }
   }
 
@@ -247,12 +266,19 @@ export function Dashboard() {
 
   async function handleSalvarCadastro(e) {
     e.preventDefault();
-    if (!novoEquipamento.nome.trim() || !novoEquipamento.codigo_barras.trim()) return;
+    const codFormatado = novoEquipamento.codigo_barras.trim().replace(/[\r\n]+/g, '');
+
+    if (!novoEquipamento.nome.trim() || !codFormatado) {
+      setMensagem('Por favor, informe o nome e o código do equipamento.');
+      return;
+    }
+
+    setCarregando(true);
 
     const payload = {
-      nome: novoEquipamento.nome,
-      codigo_barras: novoEquipamento.codigo_barras,
-      patrimonio: novoEquipamento.patrimonio || null,
+      nome: novoEquipamento.nome.trim(),
+      codigo_barras: codFormatado,
+      patrimonio: novoEquipamento.patrimonio ? novoEquipamento.patrimonio.trim() : codFormatado,
       tipo: novoEquipamento.tipo,
       case_id: novoEquipamento.tipo === 'Equipamento' && novoEquipamento.case_id ? novoEquipamento.case_id : null,
       condicao: novoEquipamento.condicao,
@@ -261,18 +287,19 @@ export function Dashboard() {
 
     const { data, error } = await supabase.from('equipamentos').insert([payload]).select();
 
+    setCarregando(false);
+
     if (!error) {
       const itemSalvo = data ? data[0] : null;
 
       if (novoEquipamento.tipo === 'Case' && itemSalvo) {
-        // Ativa modo de acondicionamento para o novo Case
         setCaseEmAcondicionamento(itemSalvo);
-        setMensagem(`Case "${itemSalvo.nome}" cadastrado! Agora escaneie os equipamentos para este Case.`);
+        setMensagem(`Case "${itemSalvo.nome}" cadastrado com sucesso! Agora escaneie os itens para este Case.`);
       } else {
         setMensagem(`${novoEquipamento.tipo} "${novoEquipamento.nome}" cadastrado com sucesso!`);
       }
 
-      // Prepara para o próximo Scan
+      // Prepara para a próxima leitura
       setNovoEquipamento({
         nome: '',
         codigo_barras: '',
@@ -284,7 +311,8 @@ export function Dashboard() {
       setPassoScan(1);
       carregarDados();
     } else {
-      setMensagem('Erro: Não foi possível cadastrar o item. Verifique se o código já existe.');
+      console.error('Erro ao salvar no Supabase:', error);
+      setMensagem(`Erro ao cadastrar: ${error.message || 'Código ou patrimônio já cadastrado no banco.'}`);
     }
   }
 
@@ -343,9 +371,9 @@ export function Dashboard() {
 
       {/* Alerta */}
       {mensagem && (
-        <div style={{ padding: '12px 16px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', borderRadius: '8px', marginBottom: '20px', fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ padding: '12px 16px', backgroundColor: mensagem.includes('Erro') || mensagem.includes('⚠️') ? '#fef2f2' : '#f0fdf4', border: `1px solid ${mensagem.includes('Erro') || mensagem.includes('⚠️') ? '#fecaca' : '#bbf7d0'}`, color: mensagem.includes('Erro') || mensagem.includes('⚠️') ? '#991b1b' : '#166534', borderRadius: '8px', marginBottom: '20px', fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>{mensagem}</span>
-          <button onClick={() => setMensagem('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#166534', fontWeight: 'bold' }}>✕</button>
+          <button onClick={() => setMensagem('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 'bold' }}>✕</button>
         </div>
       )}
 
@@ -574,9 +602,10 @@ export function Dashboard() {
 
                 <button
                   type="submit"
+                  disabled={carregando}
                   style={{ backgroundColor: '#0284c7', color: 'white', padding: '14px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', marginTop: '8px' }}
                 >
-                  Salvar {novoEquipamento.tipo} #{novoEquipamento.codigo_barras} e Continuar ➔
+                  {carregando ? 'Salvando...' : `Salvar ${novoEquipamento.tipo} #${novoEquipamento.codigo_barras} e Continuar ➔`}
                 </button>
               </form>
             )}
