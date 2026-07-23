@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { BrowserMultiFormatReader } from '@zxing/browser';
 import { supabase } from '../../lib/supabase';
 
 // Componente de Logo Reutilizável
@@ -42,7 +42,7 @@ export function LogoPaulinho() {
 export function Dashboard() {
   const [abaAtiva, setAbaAtiva] = useState('resumo');
 
-  // Dados de resumo
+  // Resumo
   const [estatisticas, setEstatisticas] = useState({
     total: 0,
     disponiveis: 0,
@@ -51,7 +51,7 @@ export function Dashboard() {
     eventosProgramados: 0,
   });
 
-  // Listas de dados
+  // Listas
   const [eventos, setEventos] = useState([]);
   const [equipamentos, setEquipamentos] = useState([]);
 
@@ -63,7 +63,7 @@ export function Dashboard() {
   });
 
   // Form Equipamentos + Câmera
-  const [passoScan, setPassoScan] = useState(1); // 1: Câmera/Scan, 2: Tipo, 3: Form
+  const [passoScan, setPassoScan] = useState(1);
   const [usarCamera, setUsarCamera] = useState(false);
   const [caseEmModoAcondicionamento, setCaseEmModoAcondicionamento] = useState(null);
   const [novoEquipamento, setNovoEquipamento] = useState({
@@ -77,32 +77,36 @@ export function Dashboard() {
 
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState('');
+  const videoRef = useRef(null);
 
   useEffect(() => {
     carregarDados();
   }, []);
 
-  // Efeito para ativar a câmera HTML5
+  // Leitor de Câmera ZXing
   useEffect(() => {
-    let scanner = null;
-    if (abaAtiva === 'equipamentos' && passoScan === 1 && usarCamera) {
-      scanner = new Html5QrcodeScanner("reader", {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-      }, false);
+    let codeReader = null;
 
-      scanner.render((decodedText) => {
-        scanner.clear();
-        setUsarCamera(false);
-        processarCodigoLido(decodedText);
-      }, (error) => {
-        // Ignora erros contínuos de varredura
+    if (abaAtiva === 'equipamentos' && passoScan === 1 && usarCamera && videoRef.current) {
+      codeReader = new BrowserMultiFormatReader();
+      codeReader.decodeFromVideoDevice(undefined, videoRef.current, (result, err) => {
+        if (result) {
+          const cod = result.getText();
+          setUsarCamera(false);
+          processarCodigoLido(cod);
+        }
       });
     }
 
     return () => {
-      if (scanner) {
-        scanner.clear().catch(() => {});
+      if (codeReader) {
+        // Encerra streams de vídeo ao desmontar
+        try {
+          const stream = videoRef.current?.srcObject;
+          if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+          }
+        } catch (e) {}
       }
     };
   }, [abaAtiva, passoScan, usarCamera]);
@@ -173,7 +177,6 @@ export function Dashboard() {
     }
   }
 
-  // Lógica central ao ler um código (seja por câmera ou digitado)
   function processarCodigoLido(codigo) {
     const codLimpo = codigo.trim();
     if (!codLimpo) return;
@@ -393,7 +396,7 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ABA 3: EQUIPAMENTOS (COM LEITOR DE CÂMERA ATIVO) */}
+      {/* ABA 3: EQUIPAMENTOS (CÂMERA ESTÁVEL) */}
       {abaAtiva === 'equipamentos' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           
@@ -413,7 +416,7 @@ export function Dashboard() {
 
           <div style={{ padding: '20px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
             
-            {/* PASSO 1: CÂMERA OU DIGITAÇÃO */}
+            {/* PASSO 1 */}
             {passoScan === 1 && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -424,21 +427,20 @@ export function Dashboard() {
                     onClick={() => setUsarCamera(!usarCamera)}
                     style={{ backgroundColor: usarCamera ? '#ef4444' : '#0284c7', color: 'white', border: 'none', padding: '8px 14px', borderRadius: '6px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}
                   >
-                    {usarCamera ? 'Fechar Câmera' : '📷 Abrir Câmera do Celular/PC'}
+                    {usarCamera ? 'Fechar Câmera' : '📷 Abrir Câmera'}
                   </button>
                 </div>
 
-                {/* Leitor Visual de Câmera */}
                 {usarCamera && (
-                  <div style={{ marginBottom: '20px', padding: '10px', border: '2px dashed #0284c7', borderRadius: '8px', backgroundColor: '#f8fafc' }}>
-                    <div id="reader" style={{ width: '100%', maxWidth: '400px', margin: '0 auto' }}></div>
+                  <div style={{ marginBottom: '20px', padding: '10px', border: '2px dashed #0284c7', borderRadius: '8px', backgroundColor: '#f8fafc', textAlign: 'center' }}>
+                    <video ref={videoRef} style={{ width: '100%', maxWidth: '400px', borderRadius: '6px' }} />
                   </div>
                 )}
 
                 <form onSubmit={handleFormCodigo} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                   <input
                     type="text"
-                    placeholder="Ou digite/use leitor USB..."
+                    placeholder="Escaneie ou digite o código..."
                     value={novoEquipamento.codigo_barras}
                     onChange={(e) => setNovoEquipamento({ ...novoEquipamento, codigo_barras: e.target.value })}
                     style={{ flex: 1, padding: '12px 14px', borderRadius: '6px', border: '2px solid #0284c7', fontSize: '15px' }}
@@ -452,7 +454,7 @@ export function Dashboard() {
               </div>
             )}
 
-            {/* PASSO 2: SELEÇÃO DE TIPO */}
+            {/* PASSO 2 */}
             {passoScan === 2 && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -477,7 +479,7 @@ export function Dashboard() {
               </div>
             )}
 
-            {/* PASSO 3: FORMULÁRIO */}
+            {/* PASSO 3 */}
             {passoScan === 3 && (
               <form onSubmit={handleCriarEquipamento} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -528,7 +530,7 @@ export function Dashboard() {
             )}
           </div>
 
-          {/* LISTA DE ESTOQUE */}
+          {/* LISTA */}
           <div>
             <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
               Estoque Cadastrado ({equipamentos.length})
@@ -564,4 +566,4 @@ export function Dashboard() {
       )}
     </div>
   );
-}S
+}
