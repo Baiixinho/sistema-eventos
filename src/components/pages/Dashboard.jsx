@@ -62,10 +62,11 @@ export function Dashboard() {
     data_inicio: '',
   });
 
-  // Form Equipamentos + Câmera
-  const [passoScan, setPassoScan] = useState(1);
+  // Fluxo Scan First
+  const [passoScan, setPassoScan] = useState(1); // 1: Ler Câmera, 2: Escolher Tipo/Preencher
   const [usarCamera, setUsarCamera] = useState(false);
-  const [caseEmModoAcondicionamento, setCaseEmModoAcondicionamento] = useState(null);
+  const [caseEmAcondicionamento, setCaseEmAcondicionamento] = useState(null);
+  
   const [novoEquipamento, setNovoEquipamento] = useState({
     nome: '',
     codigo_barras: '',
@@ -89,18 +90,16 @@ export function Dashboard() {
 
     if (abaAtiva === 'equipamentos' && passoScan === 1 && usarCamera && videoRef.current) {
       codeReader = new BrowserMultiFormatReader();
-      codeReader.decodeFromVideoDevice(undefined, videoRef.current, (result, err) => {
+      codeReader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
         if (result) {
           const cod = result.getText();
-          setUsarCamera(false);
-          processarCodigoLido(cod);
+          processarCodigoScaneado(cod);
         }
       });
     }
 
     return () => {
       if (codeReader) {
-        // Encerra streams de vídeo ao desmontar
         try {
           const stream = videoRef.current?.srcObject;
           if (stream) {
@@ -177,17 +176,18 @@ export function Dashboard() {
     }
   }
 
-  function processarCodigoLido(codigo) {
+  // Lógica principal do Scan First
+  function processarCodigoScaneado(codigo) {
     const codLimpo = codigo.trim();
     if (!codLimpo) return;
 
-    setNovoEquipamento((prev) => ({ ...prev, codigo_barras: codLimpo }));
-
-    const itemExistente = equipamentos.find((eq) => eq.codigo_barras === codLimpo);
+    // Procura se já existe no banco
+    const itemExistente = equipamentos.find((eq) => eq.codigo_barras === codLimpo || eq.patrimonio === codLimpo);
 
     if (itemExistente) {
       if (itemExistente.tipo === 'Case') {
-        setCaseEmModoAcondicionamento(itemExistente);
+        // Se escaneou um Case existente, abre o modo de colocar itens nele
+        setCaseEmAcondicionamento(itemExistente);
         setNovoEquipamento({
           nome: '',
           codigo_barras: '',
@@ -197,37 +197,33 @@ export function Dashboard() {
           condicao: 'Novo',
         });
         setPassoScan(1);
-        setMensagem(`Case "${itemExistente.nome}" selecionado! Agora escaneie os equipamentos para ele.`);
+        setMensagem(`Case "${itemExistente.nome}" selecionado! Agora escaneie os itens para ele.`);
       } else {
-        setMensagem(`Aviso: O código "${codLimpo}" já pertence ao item: ${itemExistente.nome}`);
+        setMensagem(`Aviso: Código/Patrimônio "${codLimpo}" já está cadastrado em: ${itemExistente.nome}`);
       }
     } else {
-      setPassoScan(2);
+      // É um novo código: Define automaticamente como código e patrimônio
+      setNovoEquipamento({
+        nome: '',
+        codigo_barras: codLimpo,
+        patrimonio: codLimpo,
+        tipo: 'Equipamento',
+        case_id: caseEmAcondicionamento ? caseEmAcondicionamento.id : '',
+        condicao: 'Novo',
+      });
+      setUsarCamera(false); // Pausa a câmera para preencher os dados
+      setPassoScan(2); // Vai para a escolha do tipo e nome
     }
   }
 
-  function handleFormCodigo(e) {
+  function handleFormCodigoManual(e) {
     e.preventDefault();
-    processarCodigoLido(novoEquipamento.codigo_barras);
+    processarCodigoScaneado(novoEquipamento.codigo_barras);
   }
 
-  function handleSelecionarTipo(tipo) {
-    setNovoEquipamento((prev) => ({
-      ...prev,
-      tipo,
-      case_id: tipo === 'Equipamento' && caseEmModoAcondicionamento ? caseEmModoAcondicionamento.id : prev.case_id,
-    }));
-    setPassoScan(3);
-  }
-
-  async function handleCriarEquipamento(e) {
+  async function handleSalvarCadastro(e) {
     e.preventDefault();
     if (!novoEquipamento.nome.trim() || !novoEquipamento.codigo_barras.trim()) return;
-
-    if (novoEquipamento.patrimonio && !/^\d{5}$/.test(novoEquipamento.patrimonio)) {
-      setMensagem('Erro: O patrimônio deve conter exatamente 5 dígitos numéricos.');
-      return;
-    }
 
     const payload = {
       nome: novoEquipamento.nome,
@@ -245,24 +241,26 @@ export function Dashboard() {
       const itemSalvo = data ? data[0] : null;
 
       if (novoEquipamento.tipo === 'Case' && itemSalvo) {
-        setCaseEmModoAcondicionamento(itemSalvo);
+        // Ativa modo de acondicionamento para o novo Case
+        setCaseEmAcondicionamento(itemSalvo);
         setMensagem(`Case "${itemSalvo.nome}" cadastrado! Agora escaneie os equipamentos para este Case.`);
       } else {
-        setMensagem('Item cadastrado com sucesso!');
+        setMensagem(`${novoEquipamento.tipo} "${novoEquipamento.nome}" cadastrado com sucesso!`);
       }
 
+      // Prepara para o próximo Scan
       setNovoEquipamento({
         nome: '',
         codigo_barras: '',
         patrimonio: '',
         tipo: 'Equipamento',
-        case_id: caseEmModoAcondicionamento ? caseEmModoAcondicionamento.id : '',
+        case_id: caseEmAcondicionamento ? caseEmAcondicionamento.id : '',
         condicao: 'Novo',
       });
       setPassoScan(1);
       carregarDados();
     } else {
-      setMensagem('Erro: Código de barras ou patrimônio pode já existir.');
+      setMensagem('Erro: Não foi possível cadastrar o item. Verifique se o código já existe.');
     }
   }
 
@@ -272,7 +270,9 @@ export function Dashboard() {
     carregarDados();
   }
 
-  const casesDisponiveis = equipamentos.filter((eq) => eq.tipo === 'Case');
+  const equipamentosDoCaseAtual = caseEmAcondicionamento
+    ? equipamentos.filter((eq) => eq.case_id === caseEmAcondicionamento.id)
+    : [];
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '24px 16px', fontFamily: "'Inter', system-ui, sans-serif", color: '#1e293b' }}>
@@ -294,7 +294,7 @@ export function Dashboard() {
         {[
           { id: 'resumo', label: '📊 Visão Geral' },
           { id: 'eventos', label: '📅 Eventos' },
-          { id: 'equipamentos', label: '📦 Equipamentos' },
+          { id: 'equipamentos', label: '📦 Cadastro & Leitor' },
         ].map((aba) => (
           <button
             key={aba.id}
@@ -396,32 +396,57 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ABA 3: EQUIPAMENTOS (CÂMERA ESTÁVEL) */}
+      {/* ABA 3: EQUIPAMENTOS (SCAN FIRST LOGIC) */}
       {abaAtiva === 'equipamentos' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           
-          {caseEmModoAcondicionamento && (
-            <div style={{ padding: '14px 18px', backgroundColor: '#e0f2fe', border: '1px solid #7dd3fc', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <span style={{ fontSize: '12px', color: '#0369a1', fontWeight: 'bold', textTransform: 'uppercase' }}>🧳 Modo de Acondicionamento Ativo</span>
-                <h4 style={{ margin: '2px 0 0 0', color: '#0c4a6e', fontSize: '15px' }}>
-                  Acondicionando no Case: <strong>{caseEmModoAcondicionamento.nome}</strong>
-                </h4>
+          {/* MODO ACONDICIONAMENTO DE CASE (SE ATIVO) */}
+          {caseEmAcondicionamento && (
+            <div style={{ padding: '16px', backgroundColor: '#e0f2fe', border: '2px solid #0284c7', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                    🧳 MODO CASE ATIVO
+                  </span>
+                  <h4 style={{ margin: '4px 0 0 0', color: '#0c4a6e', fontSize: '16px' }}>
+                    Acondicionando em: <strong>{caseEmAcondicionamento.nome}</strong> (#{caseEmAcondicionamento.patrimonio})
+                  </h4>
+                </div>
+                <button
+                  onClick={() => setCaseEmAcondicionamento(null)}
+                  style={{ backgroundColor: '#0284c7', color: 'white', border: 'none', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}
+                >
+                  ✓ Concluir Case
+                </button>
               </div>
-              <button onClick={() => { setCaseEmModoAcondicionamento(null); setNovoEquipamento((prev) => ({ ...prev, case_id: '' })); }} style={{ backgroundColor: '#0284c7', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
-                Concluir Case
-              </button>
+
+              {/* Lista de itens já acondicionados no Case atual */}
+              {equipamentosDoCaseAtual.length > 0 && (
+                <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed #7dd3fc' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#0369a1' }}>
+                    Itens dentro deste Case ({equipamentosDoCaseAtual.length}):
+                  </span>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                    {equipamentosDoCaseAtual.map((item) => (
+                      <span key={item.id} style={{ fontSize: '12px', backgroundColor: '#ffffff', color: '#0369a1', padding: '4px 8px', borderRadius: '4px', border: '1px solid #bae6fd', fontWeight: '500' }}>
+                        🔌 {item.nome} (#{item.patrimonio})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
+          {/* PAINEL DE LEITURA E CADASTRO */}
           <div style={{ padding: '20px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
             
-            {/* PASSO 1 */}
+            {/* PASSO 1: LER CÂMERA / DIGITAR */}
             {passoScan === 1 && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                   <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
-                    📷 Passo 1: Escanear / Digitar Código
+                    📷 Passo 1: Aproxime a Câmera do Código
                   </h3>
                   <button
                     onClick={() => setUsarCamera(!usarCamera)}
@@ -434,13 +459,16 @@ export function Dashboard() {
                 {usarCamera && (
                   <div style={{ marginBottom: '20px', padding: '10px', border: '2px dashed #0284c7', borderRadius: '8px', backgroundColor: '#f8fafc', textAlign: 'center' }}>
                     <video ref={videoRef} style={{ width: '100%', maxWidth: '400px', borderRadius: '6px' }} />
+                    <p style={{ fontSize: '12px', color: '#0284c7', margin: '8px 0 0 0', fontWeight: 'bold' }}>
+                      Centralize o código de barras ou QR na câmera
+                    </p>
                   </div>
                 )}
 
-                <form onSubmit={handleFormCodigo} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <form onSubmit={handleFormCodigoManual} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                   <input
                     type="text"
-                    placeholder="Escaneie ou digite o código..."
+                    placeholder="Ou digite o código/patrimônio manual..."
                     value={novoEquipamento.codigo_barras}
                     onChange={(e) => setNovoEquipamento({ ...novoEquipamento, codigo_barras: e.target.value })}
                     style={{ flex: 1, padding: '12px 14px', borderRadius: '6px', border: '2px solid #0284c7', fontSize: '15px' }}
@@ -454,83 +482,83 @@ export function Dashboard() {
               </div>
             )}
 
-            {/* PASSO 2 */}
+            {/* PASSO 2: ESCOLHER TIPO E NOME DO ITEM */}
             {passoScan === 2 && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <form onSubmit={handleSalvarCadastro} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
                   <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
-                    🟢 Código Lido: <span style={{ color: '#0284c7' }}>#{novoEquipamento.codigo_barras}</span>
+                    📝 Código Lido / Patrimônio: <span style={{ color: '#0284c7', fontWeight: '800' }}>#{novoEquipamento.codigo_barras}</span>
                   </h3>
-                  <button onClick={() => setPassoScan(1)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '13px' }}>← Voltar</button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  <button type="button" onClick={() => handleSelecionarTipo('Case')} style={{ padding: '20px', borderRadius: '8px', border: '2px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', textAlign: 'left' }}>
-                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>🧳</div>
-                    <strong style={{ display: 'block', fontSize: '16px', color: '#0f172a' }}>É um Case</strong>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>Maleta/Rack que guarda itens.</span>
-                  </button>
-
-                  <button type="button" onClick={() => handleSelecionarTipo('Equipamento')} style={{ padding: '20px', borderRadius: '8px', border: '2px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', textAlign: 'left' }}>
-                    <div style={{ fontSize: '24px', marginBottom: '8px' }}>🔌</div>
-                    <strong style={{ display: 'block', fontSize: '16px', color: '#0f172a' }}>É um Equipamento</strong>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>Microfone, Caixa de som, Cabo, etc.</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* PASSO 3 */}
-            {passoScan === 3 && (
-              <form onSubmit={handleCriarEquipamento} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div style={{ gridColumn: 'span 2', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
-                    📝 Cadastrar {novoEquipamento.tipo}: <span style={{ color: '#0284c7' }}>#{novoEquipamento.codigo_barras}</span>
-                  </h3>
-                  <button type="button" onClick={() => setPassoScan(2)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '13px' }}>← Alterar Tipo</button>
+                  <button type="button" onClick={() => setPassoScan(1)} style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '13px' }}>← Cancelar / Refazer Scan</button>
                 </div>
 
-                <input
-                  type="text"
-                  placeholder={novoEquipamento.tipo === 'Case' ? "Nome do Case (ex: Case Mics #01)" : "Nome do Equipamento (ex: Microfone SM58)"}
-                  value={novoEquipamento.nome}
-                  onChange={(e) => setNovoEquipamento({ ...novoEquipamento, nome: e.target.value })}
-                  style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', gridColumn: 'span 2' }}
-                  autoFocus
-                  required
-                />
+                {/* Seleção do Tipo */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#475569', marginBottom: '8px' }}>
+                    Este código pertence a um:
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setNovoEquipamento((prev) => ({ ...prev, tipo: 'Equipamento' }))}
+                      style={{
+                        padding: '14px',
+                        borderRadius: '8px',
+                        border: novoEquipamento.tipo === 'Equipamento' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                        backgroundColor: novoEquipamento.tipo === 'Equipamento' ? '#f0f9ff' : '#ffffff',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <strong style={{ display: 'block', fontSize: '15px', color: '#0f172a' }}>🔌 Equipamento</strong>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>Microfone, cabo, mesa, caixa, etc.</span>
+                    </button>
 
-                <input
-                  type="text"
-                  placeholder="Patrimônio (5 dígitos, ex: 12345)"
-                  value={novoEquipamento.patrimonio}
-                  maxLength={5}
-                  onChange={(e) => setNovoEquipamento({ ...novoEquipamento, patrimonio: e.target.value.replace(/\D/g, '') })}
-                  style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
-                />
+                    <button
+                      type="button"
+                      onClick={() => setNovoEquipamento((prev) => ({ ...prev, tipo: 'Case' }))}
+                      style={{
+                        padding: '14px',
+                        borderRadius: '8px',
+                        border: novoEquipamento.tipo === 'Case' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                        backgroundColor: novoEquipamento.tipo === 'Case' ? '#f0f9ff' : '#ffffff',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <strong style={{ display: 'block', fontSize: '15px', color: '#0f172a' }}>🧳 Case / Baú</strong>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>Rack/Maleta que armazena itens.</span>
+                    </button>
+                  </div>
+                </div>
 
-                {novoEquipamento.tipo === 'Equipamento' && (
-                  <select
-                    value={novoEquipamento.case_id}
-                    onChange={(e) => setNovoEquipamento({ ...novoEquipamento, case_id: e.target.value })}
-                    style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
-                  >
-                    <option value="">Sem Case (Avulso)</option>
-                    {casesDisponiveis.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        Vincular ao Case: {c.nome} {c.patrimonio ? `[${c.patrimonio}]` : ''}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                {/* Descrição / Nome */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>
+                    Descrição / Nome do {novoEquipamento.tipo}:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={novoEquipamento.tipo === 'Case' ? "Ex: Case Mics Sem Fio #01" : "Ex: Microfone Shure SM58"}
+                    value={novoEquipamento.nome}
+                    onChange={(e) => setNovoEquipamento({ ...novoEquipamento, nome: e.target.value })}
+                    style={{ width: '100%', padding: '12px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }}
+                    autoFocus
+                    required
+                  />
+                </div>
 
-                <button type="submit" style={{ gridColumn: 'span 2', backgroundColor: '#0284c7', color: 'white', padding: '12px', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '14px', cursor: 'pointer', marginTop: '8px' }}>
-                  Salvar {novoEquipamento.tipo} e Continuar
+                <button
+                  type="submit"
+                  style={{ backgroundColor: '#0284c7', color: 'white', padding: '14px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer', marginTop: '8px' }}
+                >
+                  Salvar {novoEquipamento.tipo} #{novoEquipamento.codigo_barras} e Continuar ➔
                 </button>
               </form>
             )}
           </div>
 
-          {/* LISTA */}
+          {/* LISTA DE ESTOQUE CADASTRADO */}
           <div>
             <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
               Estoque Cadastrado ({equipamentos.length})
@@ -545,11 +573,12 @@ export function Dashboard() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <strong style={{ fontSize: '14px', color: '#0f172a' }}>{eq.nome}</strong>
                         {eq.tipo === 'Case' && <span style={{ fontSize: '10px', backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>CASE</span>}
-                        {eq.patrimonio && <span style={{ fontSize: '11px', backgroundColor: '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}>PAT: #{eq.patrimonio}</span>}
+                        <span style={{ fontSize: '11px', backgroundColor: '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
+                          PAT / CÓD: #{eq.patrimonio || eq.codigo_barras}
+                        </span>
                       </div>
                       <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                        Cód: {eq.codigo_barras}
-                        {casePai && <span style={{ marginLeft: '8px', color: '#0284c7', fontWeight: '500' }}>🧳 Acondicionado em: {casePai.nome}</span>}
+                        {casePai && <span style={{ color: '#0284c7', fontWeight: '500' }}>🧳 Acondicionado em: {casePai.nome}</span>}
                       </div>
                     </div>
                     <div>
