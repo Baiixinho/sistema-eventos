@@ -1,15 +1,13 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { Login } from './pages/Login'; // ou './components/pages/Login'
+import { Routes, Route } from 'react-router-dom';
+import { Login } from './components/Login'; // 👈 Apontando para src/components/Login.jsx
 import { CheckOut } from './components/pages/CheckOut';
 
 export function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/checkout" element={<CheckOut />} />
-      </Routes>
-    </BrowserRouter>
+    <Routes>
+      <Route path="/" element={<Login />} />
+      <Route path="/checkout" element={<CheckOut />} />
+    </Routes>
   );
 }
 
