@@ -7,7 +7,7 @@ export function CheckOut() {
   const [eventoSelecionado, setEventoSelecionado] = useState('');
   const [tipoOperacao, setTipoOperacao] = useState('saida'); // 'saida' ou 'entrada'
   
-  // Controle de Trava de Segurança e Leitor Continuo
+  // Controle de Trava de Lote e Leitor
   const [operacaoIniciada, setOperacaoIniciada] = useState(false);
   const [mostrarLeitor, setMostrarLeitor] = useState(false);
   const [carregando, setCarregando] = useState(false);
@@ -16,7 +16,7 @@ export function CheckOut() {
   const [mensagemErro, setMensagemErro] = useState('');
   const [itensBipados, setItensBipados] = useState([]);
 
-  // Ref para evitar leituras múltiplas consecutivas do mesmo código em milissegundos
+  // Ref para controle de leitura contínua sem repetições
   const processandoRef = useRef(false);
 
   // 🔊 GERADOR DE SOM (Web Audio API)
@@ -33,23 +33,23 @@ export function CheckOut() {
 
       if (tipo === 'sucesso') {
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(1200, ctx.currentTime); // Som agudo (Bipe bom)
+        osc.frequency.setValueAtTime(1200, ctx.currentTime); // Som agudo (sucesso)
         gain.gain.setValueAtTime(0.15, ctx.currentTime);
         osc.start();
         osc.stop(ctx.currentTime + 0.12);
       } else {
         osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(300, ctx.currentTime); // Som grave (Erro/Alerta)
+        osc.frequency.setValueAtTime(300, ctx.currentTime); // Som grave (erro)
         gain.gain.setValueAtTime(0.2, ctx.currentTime);
         osc.start();
         osc.stop(ctx.currentTime + 0.3);
       }
     } catch (e) {
-      console.log('Audio API não suportada ou bloqueada pelo navegador.');
+      console.log('Audio API não iniciada.');
     }
   };
 
-  // Busca eventos ativos no Supabase ao carregar
+  // Carrega lista de eventos ativos
   useEffect(() => {
     async function carregarEventos() {
       const { data, error } = await supabase
@@ -66,8 +66,8 @@ export function CheckOut() {
     carregarEventos();
   }, []);
 
+  // Processa leitura de código de barras
   const handleCodigoLido = async (codigo) => {
-    // Evita ler múltiplos códigos de uma vez só se a câmera continuar sobre a etiqueta
     if (processandoRef.current) return;
     processandoRef.current = true;
 
@@ -83,12 +83,11 @@ export function CheckOut() {
 
     const codigoLimpo = codigo.trim();
 
-    // 🔒 TRAVA DE DUPLICIDADE
+    // Trava de Duplicidade
     const jaNaLista = itensBipados.some(item => item.codigo === codigoLimpo);
     if (jaNaLista) {
       tocarSomBipe('erro');
       setMensagemErro(`⚠️ O Patrimônio "${codigoLimpo}" já está nesta lista!`);
-      // Pausa de 2s para não ficar bipando o erro sem parar
       setTimeout(() => { processandoRef.current = false; }, 2000);
       return;
     }
@@ -96,7 +95,7 @@ export function CheckOut() {
     setCarregando(true);
 
     try {
-      // 1. Busca o equipamento no Supabase
+      // 1. Busca item no banco
       const { data: equipamento, error: erroBusca } = await supabase
         .from('equipamentos')
         .select('*')
@@ -105,7 +104,7 @@ export function CheckOut() {
 
       if (erroBusca || !equipamento) {
         tocarSomBipe('erro');
-        setMensagemErro(`❌ Item com código "${codigoLimpo}" não cadastrado.`);
+        setMensagemErro(`❌ Patrimônio "${codigoLimpo}" não cadastrado no estoque.`);
         setTimeout(() => { processandoRef.current = false; }, 2000);
         return;
       }
@@ -120,7 +119,7 @@ export function CheckOut() {
 
       if (erroAtualizacao) throw erroAtualizacao;
 
-      // 3. Grava histórico na tabela
+      // 3. Grava histórico
       const { data: movimentacao, error: erroHistorico } = await supabase
         .from('movimentacoes')
         .insert([
@@ -135,9 +134,8 @@ export function CheckOut() {
 
       if (erroHistorico) throw erroHistorico;
 
-      // 🔔 TOCA BIPE DE SUCESSO!
+      // Sucesso
       tocarSomBipe('sucesso');
-
       setOperacaoIniciada(true);
 
       const novoItem = {
@@ -155,17 +153,17 @@ export function CheckOut() {
     } catch (err) {
       console.error(err);
       tocarSomBipe('erro');
-      setMensagemErro('Erro ao salvar movimentação no Supabase.');
+      setMensagemErro('Erro ao salvar no banco de dados.');
     } finally {
       setCarregando(false);
-      // Aguarda 1.5 segundo antes de liberar a câmera para o próximo item
+      // Pausa de 1.5 segundo para mover a câmera para o próximo item
       setTimeout(() => {
         processandoRef.current = false;
       }, 1500);
     }
   };
 
-  // REMOÇÃO DE ITEM COM HISTÓRICO
+  // Remoção do Item
   const handleRemoverItem = async (itemParaRemover) => {
     setMensagemErro('');
     setMensagemSucesso('');
@@ -195,7 +193,7 @@ export function CheckOut() {
       }
 
       tocarSomBipe('sucesso');
-      setMensagemSucesso(`🗑️ Item "${itemParaRemover.nome}" removido da lista.`);
+      setMensagemSucesso(`🗑️ Item "${itemParaRemover.nome}" removido (registro gravado).`);
     } catch (err) {
       console.error(err);
       tocarSomBipe('erro');
@@ -215,16 +213,27 @@ export function CheckOut() {
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif' }}>
-      {/* 1. MUDANÇA DO TÍTULO */}
-      <h1 style={{ textAlign: 'center', marginBottom: '5px', color: '#1e293b' }}>Montagem de Evento</h1>
-      <p style={{ textAlign: 'center', color: '#64748b', marginBottom: '20px' }}>
-        Conferência contínua de Saída e Entrada
+      
+      {/* Logotipo Oficial da Paulinho Produções (.jpeg) */}
+      <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+        <img 
+          src="/logo.jpeg" 
+          alt="Paulinho Produções" 
+          style={{ height: '75px', maxWidth: '100%', objectFit: 'contain' }} 
+        />
+      </div>
+
+      <h1 style={{ textAlign: 'center', margin: '5px 0', color: '#0f172a', fontSize: '24px' }}>
+        Montagem de Evento
+      </h1>
+      <p style={{ textAlign: 'center', color: '#64748b', marginTop: 0, marginBottom: '20px', fontSize: '14px' }}>
+        Conferência de Entrada e Saída
       </p>
 
-      {/* Trava de lote */}
+      {/* Trava de Lote */}
       {operacaoIniciada && (
         <div style={{ backgroundColor: '#fef3c7', color: '#92400e', padding: '10px 15px', borderRadius: '8px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>🔒 Lote em andamento ({itensBipados.length} itens)</span>
+          <span style={{ fontWeight: '500' }}>🔒 Lote em andamento ({itensBipados.length} itens)</span>
           <button
             onClick={resetarOperacao}
             style={{ backgroundColor: '#d97706', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
@@ -234,7 +243,7 @@ export function CheckOut() {
         </div>
       )}
 
-      {/* Botões de Entrada / Saída */}
+      {/* Tipo de Operação */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
         <button
           disabled={operacaoIniciada}
@@ -247,8 +256,8 @@ export function CheckOut() {
             borderRadius: '8px',
             border: 'none',
             opacity: operacaoIniciada && tipoOperacao !== 'saida' ? 0.4 : 1,
-            backgroundColor: tipoOperacao === 'saida' ? '#dc2626' : '#f3f4f6',
-            color: tipoOperacao === 'saida' ? 'white' : '#374151',
+            backgroundColor: tipoOperacao === 'saida' ? '#dc2626' : '#f1f5f9',
+            color: tipoOperacao === 'saida' ? 'white' : '#334155',
             cursor: operacaoIniciada ? 'not-allowed' : 'pointer'
           }}
         >
@@ -266,8 +275,8 @@ export function CheckOut() {
             borderRadius: '8px',
             border: 'none',
             opacity: operacaoIniciada && tipoOperacao !== 'entrada' ? 0.4 : 1,
-            backgroundColor: tipoOperacao === 'entrada' ? '#16a34a' : '#f3f4f6',
-            color: tipoOperacao === 'entrada' ? 'white' : '#374151',
+            backgroundColor: tipoOperacao === 'entrada' ? '#16a34a' : '#f1f5f9',
+            color: tipoOperacao === 'entrada' ? 'white' : '#334155',
             cursor: operacaoIniciada ? 'not-allowed' : 'pointer'
           }}
         >
@@ -275,7 +284,7 @@ export function CheckOut() {
         </button>
       </div>
 
-      {/* Evento */}
+      {/* Seleção de Evento */}
       <div style={{ marginBottom: '20px' }}>
         <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '6px', color: '#334155' }}>
           Evento / Cliente Destino:
@@ -290,7 +299,8 @@ export function CheckOut() {
             fontSize: '16px',
             borderRadius: '8px',
             border: '1px solid #cbd5e1',
-            backgroundColor: operacaoIniciada ? '#e2e8f0' : 'white'
+            backgroundColor: operacaoIniciada ? '#e2e8f0' : 'white',
+            cursor: operacaoIniciada ? 'not-allowed' : 'pointer'
           }}
         >
           {eventos.length === 0 ? (
@@ -305,12 +315,12 @@ export function CheckOut() {
         </select>
       </div>
 
-      {/* Botão para Ligar Câmera */}
+      {/* Botão Câmera */}
       {!mostrarLeitor ? (
         <button
           onClick={() => {
             if (!eventoSelecionado) {
-              setMensagemErro('Selecione um evento cadastrado.');
+              setMensagemErro('Selecione um evento antes de abrir a câmera.');
               tocarSomBipe('erro');
               return;
             }
@@ -333,7 +343,6 @@ export function CheckOut() {
         </button>
       ) : (
         <div style={{ marginTop: '10px' }}>
-          {/* CÂMERA MANTÉM-SE ATIVA AQUI */}
           <BarcodeReader onScanSuccess={handleCodigoLido} />
           
           <button
@@ -355,14 +364,14 @@ export function CheckOut() {
         </div>
       )}
 
-      {/* Indicadores */}
+      {/* Loading */}
       {carregando && (
         <p style={{ textAlign: 'center', color: '#2563eb', fontWeight: 'bold', marginTop: '15px' }}>
           🔄 Gravando no banco...
         </p>
       )}
 
-      {/* Alertas com Som */}
+      {/* Mensagens */}
       {mensagemErro && (
         <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '12px', borderRadius: '8px', marginTop: '15px', fontWeight: 'bold' }}>
           {mensagemErro}
@@ -375,10 +384,10 @@ export function CheckOut() {
         </div>
       )}
 
-      {/* Lista de Itens */}
+      {/* Lista do Lote */}
       {itensBipados.length > 0 && (
         <div style={{ marginTop: '25px', borderTop: '2px solid #e2e8f0', paddingTop: '15px' }}>
-          <h3>Itens Processados Neste Lote ({itensBipados.length}):</h3>
+          <h3 style={{ color: '#1e293b' }}>Itens Processados Neste Lote ({itensBipados.length}):</h3>
           <ul style={{ listStyleType: 'none', padding: 0 }}>
             {itensBipados.map((item, index) => (
               <li
