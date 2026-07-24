@@ -92,53 +92,65 @@ export function Dashboard() {
 
   function obterStatusCalculado(evento) {
     if (evento.status === 'finalizado') return 'finalizado';
-    if (!evento.data_inicio) return 'ativo';
     const hoje = new Date().toISOString().split('T')[0];
-    return evento.data_inicio > hoje ? 'programado' : 'ativo';
+    if (evento.data_inicio && evento.data_inicio > hoje) return 'programado';
+    const temEquipamento = equipamentos.some(
+      (eq) => eq.status === 'Em Uso' && obterEventoAtual(eq.id) === evento.nome
+    );
+    return temEquipamento ? 'ativo' : 'aguardando';
   }
 
   async function carregarDados() {
     setCarregando(true);
 
     const { data: eqData } = await supabase.from('equipamentos').select('*');
-    if (eqData) {
-      setEquipamentos(eqData);
-      const disp = eqData.filter((i) => i.status === 'Disponível').length;
-      const uso = eqData.filter((i) => i.status === 'Em Uso').length;
-      setEstatisticas((prev) => ({
-        ...prev,
-        total: eqData.length,
-        disponiveis: disp,
-        emUso: uso,
-      }));
-    }
-
     const { data: evData } = await supabase
       .from('eventos')
       .select('*')
       .order('data_inicio', { ascending: true });
-
-    if (evData) {
-      setEventos(evData);
-      const hoje = new Date().toISOString().split('T')[0];
-      const ativos = evData.filter((e) => e.status !== 'finalizado' && e.data_inicio <= hoje).length;
-      const programados = evData.filter((e) => e.status !== 'finalizado' && e.data_inicio > hoje).length;
-
-      setEstatisticas((prev) => ({
-        ...prev,
-        eventosAtivos: ativos,
-        eventosProgramados: programados,
-      }));
-    }
-
     const { data: movData } = await supabase
       .from('movimentacoes')
       .select('*')
       .order('data_hora', { ascending: false });
 
-    if (movData) {
-      setMovimentacoes(movData);
+    const equipamentosCarregados = eqData || [];
+    const eventosCarregados = evData || [];
+    const movimentacoesCarregadas = movData || [];
+
+    setEquipamentos(equipamentosCarregados);
+    setEventos(eventosCarregados);
+    setMovimentacoes(movimentacoesCarregadas);
+
+    const disp = equipamentosCarregados.filter((i) => i.status === 'Disponível').length;
+    const uso = equipamentosCarregados.filter((i) => i.status === 'Em Uso').length;
+
+    function eventoTemEquipamento(nomeEvento) {
+      return equipamentosCarregados.some((eq) => {
+        if (eq.status !== 'Em Uso') return false;
+        const ultimaMov = movimentacoesCarregadas.find((m) => m.equipamento_id === eq.id);
+        return ultimaMov && ultimaMov.tipo === 'saida' && ultimaMov.evento === nomeEvento;
+      });
     }
+
+    const hoje = new Date().toISOString().split('T')[0];
+    let ativos = 0;
+    let programados = 0;
+    eventosCarregados.forEach((ev) => {
+      if (ev.status === 'finalizado') return;
+      if (ev.data_inicio && ev.data_inicio > hoje) {
+        programados++;
+      } else if (eventoTemEquipamento(ev.nome)) {
+        ativos++;
+      }
+    });
+
+    setEstatisticas({
+      total: equipamentosCarregados.length,
+      disponiveis: disp,
+      emUso: uso,
+      eventosAtivos: ativos,
+      eventosProgramados: programados,
+    });
 
     setCarregando(false);
   }
@@ -583,25 +595,70 @@ export function Dashboard() {
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {eventos.map((ev) => {
                 const statusCalculado = obterStatusCalculado(ev);
-                let tagBg = statusCalculado === 'programado' ? '#fefce8' : statusCalculado === 'finalizado' ? '#f1f5f9' : '#f0fdf4';
-                let tagColor = statusCalculado === 'programado' ? '#854d0e' : statusCalculado === 'finalizado' ? '#64748b' : '#166534';
-                let tagBorder = statusCalculado === 'programado' ? '#fef08a' : statusCalculado === 'finalizado' ? '#e2e8f0' : '#bbf7d0';
+                const equipamentosDoEvento = equipamentos.filter(
+                  (eq) => eq.status === 'Em Uso' && obterEventoAtual(eq.id) === ev.nome
+                );
+                const expandido = itensExpandidos.has(ev.id);
+
+                const CORES_STATUS = {
+                  programado: { bg: '#fefce8', text: '#854d0e', border: '#fef08a' },
+                  aguardando: { bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe' },
+                  ativo: { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' },
+                  finalizado: { bg: '#f1f5f9', text: '#64748b', border: '#e2e8f0' },
+                };
+                const LABELS_STATUS = {
+                  programado: 'PROGRAMADO',
+                  aguardando: 'AGUARDANDO EQUIPAMENTOS',
+                  ativo: 'ATIVO',
+                  finalizado: 'FINALIZADO',
+                };
+                const cor = CORES_STATUS[statusCalculado];
 
                 return (
-                  <li key={ev.id} style={{ padding: '14px 16px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <strong style={{ fontSize: '15px', color: '#0f172a' }}>{ev.nome}</strong>
-                      {ev.cliente && <span style={{ color: '#64748b', marginLeft: '8px', fontSize: '14px' }}>• {ev.cliente}</span>}
-                      <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 8px', borderRadius: '4px', backgroundColor: tagBg, color: tagColor, border: `1px solid ${tagBorder}` }}>
-                          {statusCalculado.toUpperCase()}
-                        </span>
-                        {ev.data_inicio && <span style={{ fontSize: '12px', color: '#64748b' }}>Data: {new Date(ev.data_inicio + 'T00:00:00').toLocaleDateString('pt-BR')}</span>}
+                  <li
+                    key={ev.id}
+                    onClick={() => equipamentosDoEvento.length > 0 && toggleExpandido(ev.id)}
+                    style={{ padding: '14px 16px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '8px', cursor: equipamentosDoEvento.length > 0 ? 'pointer' : 'default' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <div>
+                        <strong style={{ fontSize: '15px', color: '#0f172a' }}>{ev.nome}</strong>
+                        {ev.cliente && <span style={{ color: '#64748b', marginLeft: '8px', fontSize: '14px' }}>• {ev.cliente}</span>}
+                        <div style={{ marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 8px', borderRadius: '4px', backgroundColor: cor.bg, color: cor.text, border: `1px solid ${cor.border}` }}>
+                            {LABELS_STATUS[statusCalculado]}
+                          </span>
+                          {ev.data_inicio && <span style={{ fontSize: '12px', color: '#64748b' }}>Data: {new Date(ev.data_inicio + 'T00:00:00').toLocaleDateString('pt-BR')}</span>}
+                          {equipamentosDoEvento.length > 0 && (
+                            <span style={{ fontSize: '11px', backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
+                              🔌 {equipamentosDoEvento.length} {equipamentosDoEvento.length === 1 ? 'equipamento' : 'equipamentos'} {expandido ? '▲' : '▾'}
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleStatusEvento(ev.id, ev.status);
+                        }}
+                        style={{ padding: '8px 14px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', backgroundColor: ev.status === 'finalizado' ? '#f0f9ff' : '#fef2f2', color: ev.status === 'finalizado' ? '#0284c7' : '#dc2626' }}
+                      >
+                        {ev.status === 'finalizado' ? 'Reativar Evento' : 'Encerrar Evento'}
+                      </button>
                     </div>
-                    <button onClick={() => toggleStatusEvento(ev.id, ev.status)} style={{ padding: '8px 14px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', backgroundColor: ev.status === 'finalizado' ? '#f0f9ff' : '#fef2f2', color: ev.status === 'finalizado' ? '#0284c7' : '#dc2626' }}>
-                      {ev.status === 'finalizado' ? 'Reativar Evento' : 'Encerrar Evento'}
-                    </button>
+
+                    {expandido && equipamentosDoEvento.length > 0 && (
+                      <ul
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ listStyle: 'none', margin: '10px 0 0 0', padding: '10px 0 0 12px', borderTop: '1px dashed #e2e8f0', borderLeft: '2px solid #bae6fd' }}
+                      >
+                        {equipamentosDoEvento.map((eq) => (
+                          <li key={eq.id} style={{ fontSize: '13px', color: '#334155', padding: '4px 0' }}>
+                            🔌 {eq.nome} <span style={{ color: '#94a3b8' }}>(#{eq.patrimonio || eq.codigo_barras})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </li>
                 );
               })}
