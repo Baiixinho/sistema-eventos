@@ -51,6 +51,21 @@ export function Dashboard() {
 
   const PIN_CONFIRMACAO_EXCLUSAO = '9999';
 
+  // Controle de expansão de detalhes na lista de estoque
+  const [itensExpandidos, setItensExpandidos] = useState(new Set());
+
+  function toggleExpandido(id) {
+    setItensExpandidos((prev) => {
+      const proximo = new Set(prev);
+      if (proximo.has(id)) {
+        proximo.delete(id);
+      } else {
+        proximo.add(id);
+      }
+      return proximo;
+    });
+  }
+
   // Trava para evitar leituras duplas simultâneas (debounce/lock)
   const isProcessingRef = useRef(false);
 
@@ -132,6 +147,56 @@ export function Dashboard() {
   function obterEventoAtual(equipamentoId) {
     const ultimaMovimentacao = movimentacoes.find((m) => m.equipamento_id === equipamentoId);
     return ultimaMovimentacao && ultimaMovimentacao.tipo === 'saida' ? ultimaMovimentacao.evento : null;
+  }
+
+  function renderLinhaEstoque(eq, aninhado = false) {
+    const eventoAtual = eq.status === 'Em Uso' ? obterEventoAtual(eq.id) : null;
+    const expandido = itensExpandidos.has(eq.id);
+    const corStatus =
+      eq.status === 'Disponível'
+        ? { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }
+        : eq.status === 'Em Manutenção'
+        ? { bg: '#fffbeb', text: '#92400e', border: '#fde68a' }
+        : { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' };
+
+    return (
+      <div style={{ padding: aninhado ? '8px 12px' : '12px 16px', backgroundColor: aninhado ? '#f8fafc' : '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+            <span style={{ fontSize: '13px' }}>{eq.tipo === 'Case' ? '🧳' : '🔌'}</span>
+            <strong style={{ fontSize: aninhado ? '13px' : '14px', color: '#0f172a' }}>{eq.nome}</strong>
+            <span style={{ fontSize: '11px', backgroundColor: '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
+              #{eq.patrimonio || eq.codigo_barras}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: corStatus.bg, color: corStatus.text, border: `1px solid ${corStatus.border}`, fontWeight: '600' }}>
+              {eq.status}
+            </span>
+            {eventoAtual && (
+              <button
+                onClick={() => toggleExpandido(eq.id)}
+                style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', cursor: 'pointer' }}
+              >
+                {expandido ? '▲' : '▾'}
+              </button>
+            )}
+            <button
+              onClick={() => abrirEdicao(eq)}
+              style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer' }}
+            >
+              ✏️ Editar
+            </button>
+          </div>
+        </div>
+
+        {expandido && eventoAtual && (
+          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0', fontSize: '12px', color: '#b91c1c', fontWeight: '500' }}>
+            📍 Em uso no evento: {eventoAtual}
+          </div>
+        )}
+      </div>
+    );
   }
 
   async function handleCriarEvento(e) {
@@ -393,7 +458,18 @@ export function Dashboard() {
       </header>
 
       {/* Navegação */}
-      <nav style={{ display: 'flex', gap: '8px', marginBottom: '24px', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
+      <nav
+        style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '24px',
+          backgroundColor: '#f1f5f9',
+          padding: '4px',
+          borderRadius: '8px',
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
         {[
           { id: 'resumo', label: '📊 Visão Geral' },
           { id: 'eventos', label: '📅 Eventos' },
@@ -405,7 +481,8 @@ export function Dashboard() {
             key={aba.id}
             onClick={() => setAbaAtiva(aba.id)}
             style={{
-              flex: 1,
+              flex: '0 0 auto',
+              whiteSpace: 'nowrap',
               padding: '10px 16px',
               borderRadius: '6px',
               border: 'none',
@@ -808,45 +885,26 @@ export function Dashboard() {
               Estoque Cadastrado ({equipamentos.length})
             </h3>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {equipamentos.map((eq) => {
-                const casePai = eq.case_id ? equipamentos.find((c) => c.id === eq.case_id) : null;
-                const eventoAtual = eq.status === 'Em Uso' ? obterEventoAtual(eq.id) : null;
-                const corStatus =
-                  eq.status === 'Disponível'
-                    ? { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }
-                    : eq.status === 'Em Manutenção'
-                    ? { bg: '#fffbeb', text: '#92400e', border: '#fde68a' }
-                    : { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' };
+              {equipamentos
+                .filter((eq) => !eq.case_id)
+                .map((eq) => {
+                  const filhos = eq.tipo === 'Case' ? equipamentos.filter((c) => c.case_id === eq.id) : [];
 
-                return (
-                  <li key={eq.id} style={{ padding: '12px 16px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <strong style={{ fontSize: '14px', color: '#0f172a' }}>{eq.nome}</strong>
-                        {eq.tipo === 'Case' && <span style={{ fontSize: '10px', backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>CASE</span>}
-                        <span style={{ fontSize: '11px', backgroundColor: '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
-                          PAT / CÓD: #{eq.patrimonio || eq.codigo_barras}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                        {casePai && <span style={{ color: '#0284c7', fontWeight: '500' }}>🧳 Acondicionado em: {casePai.nome}</span>}
-                        {eventoAtual && <span style={{ color: '#b91c1c', fontWeight: '500' }}>📍 Em uso no evento: {eventoAtual}</span>}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: corStatus.bg, color: corStatus.text, border: `1px solid ${corStatus.border}`, fontWeight: '600' }}>
-                        {eq.status}
-                      </span>
-                      <button
-                        onClick={() => abrirEdicao(eq)}
-                        style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer' }}
-                      >
-                        ✏️ Editar
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
+                  return (
+                    <li key={eq.id} style={{ marginBottom: '8px' }}>
+                      {renderLinhaEstoque(eq)}
+                      {filhos.length > 0 && (
+                        <ul style={{ listStyle: 'none', margin: '6px 0 0 18px', padding: '0 0 0 12px', borderLeft: '2px solid #bae6fd' }}>
+                          {filhos.map((filho) => (
+                            <li key={filho.id} style={{ marginBottom: '6px' }}>
+                              {renderLinhaEstoque(filho, true)}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
             </ul>
           </div>
         </div>
