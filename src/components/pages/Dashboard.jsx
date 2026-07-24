@@ -158,7 +158,7 @@ export function Dashboard() {
 
   function iniciarCadastroEquipamento() {
     setMensagem('');
-    setAbaAtiva('equipamentos');
+    setAbaAtiva('cadastro');
     setCaseEmAcondicionamento(null);
     setPassoScan(1);
     setUsarCamera(true);
@@ -397,7 +397,8 @@ export function Dashboard() {
         {[
           { id: 'resumo', label: '📊 Visão Geral' },
           { id: 'eventos', label: '📅 Eventos' },
-          { id: 'equipamentos', label: '📦 Cadastro & Leitor' },
+          { id: 'cadastro', label: '📷 Cadastrar' },
+          { id: 'estoque', label: '📦 Estoque' },
           { id: 'historico', label: '🕓 Histórico' },
         ].map((aba) => (
           <button
@@ -509,10 +510,10 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* ABA 3: EQUIPAMENTOS (SCAN FIRST LOGIC) */}
-      {abaAtiva === 'equipamentos' && (
+      {/* ABA 3: CADASTRAR (SCAN FIRST LOGIC) */}
+      {abaAtiva === 'cadastro' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          
+
           {/* MODO ACONDICIONAMENTO DE CASE (SE ATIVO) */}
           {caseEmAcondicionamento && (
             <div style={{ padding: '16px', backgroundColor: '#e0f2fe', border: '2px solid #0284c7', borderRadius: '10px' }}>
@@ -671,7 +672,12 @@ export function Dashboard() {
               </form>
             )}
           </div>
+        </div>
+      )}
 
+      {/* ABA 3B: ESTOQUE (EDIÇÃO E LISTA) */}
+      {abaAtiva === 'estoque' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {/* PAINEL DE EDIÇÃO DE ITEM EXISTENTE */}
           {itemEditando && (
             <div style={{ padding: '16px', backgroundColor: '#fffbeb', border: '2px solid #d97706', borderRadius: '10px' }}>
