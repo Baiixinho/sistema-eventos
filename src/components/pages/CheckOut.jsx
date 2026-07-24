@@ -1,45 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { BarcodeReader } from '../BarcodeReader';
-
-// Logo desenhada diretamente via código CSS
-function LogoPaulinho() {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '15px' }}>
-      {/* Equalizador Vértical (5 faders da logo) */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginBottom: '8px' }}>
-        <div style={{ width: '10px', height: '45px', borderRadius: '5px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '18px', left: '-4px' }}></div>
-        </div>
-        <div style={{ width: '10px', height: '45px', borderRadius: '5px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '8px', left: '-4px' }}></div>
-        </div>
-        <div style={{ width: '10px', height: '45px', borderRadius: '5px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '22px', left: '-4px' }}></div>
-        </div>
-        <div style={{ width: '10px', height: '45px', borderRadius: '5px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '10px', left: '-4px' }}></div>
-        </div>
-        <div style={{ width: '10px', height: '45px', borderRadius: '5px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '14px', height: '14px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '26px', left: '-4px' }}></div>
-        </div>
-      </div>
-
-      {/* Texto da Logo */}
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ color: '#0f172a', fontWeight: '900', fontSize: '20px', letterSpacing: '3px', lineHeight: '1.1' }}>
-          PAULINHO
-        </div>
-        <div style={{ color: '#0f172a', fontWeight: '900', fontSize: '18px', letterSpacing: '2px', lineHeight: '1.1', marginTop: '2px' }}>
-          PRODUÇÕES
-        </div>
-        <div style={{ color: '#0284c7', fontSize: '9px', fontWeight: 'bold', letterSpacing: '2px', marginTop: '4px' }}>
-          TECNOLOGIA E ESTRUTURA
-        </div>
-      </div>
-    </div>
-  );
-}
+import { Logo } from '../Logo';
 
 export function CheckOut() {
   const [eventos, setEventos] = useState([]);
@@ -248,8 +210,7 @@ export function CheckOut() {
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto', fontFamily: 'sans-serif' }}>
       
-      {/* Logotipo Paulinho Produções em CSS Puro */}
-      <LogoPaulinho />
+      <Logo style={{ marginBottom: '15px' }} />
 
       <h1 style={{ textAlign: 'center', margin: '5px 0', color: '#0f172a', fontSize: '24px' }}>
         Montagem de Evento

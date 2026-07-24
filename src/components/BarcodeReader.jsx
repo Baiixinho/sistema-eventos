@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
-export function BarcodeReader({ onScanSuccess, onScanError }) {
+export function BarcodeReader({ onScanSuccess, onScanError, mostrarTitulo = true }) {
   const html5QrCodeRef = useRef(null);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -75,7 +75,7 @@ export function BarcodeReader({ onScanSuccess, onScanError }) {
 
   return (
     <div style={{ position: 'relative', width: '100%', maxWidth: '500px', margin: '0 auto' }}>
-      <h3 style={{ textAlign: 'center' }}>Aproxime o Código de Barras da Câmera</h3>
+      {mostrarTitulo && <h3 style={{ textAlign: 'center' }}>Aproxime o Código de Barras da Câmera</h3>}
       
       {/* Área de exibição da câmera */}
       <div id="reader" style={{ width: '100%', borderRadius: '8px', overflow: 'hidden' }}></div>

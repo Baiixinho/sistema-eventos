@@ -1,42 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { BrowserMultiFormatReader } from '@zxing/browser';
 import { supabase } from '../../lib/supabase';
-
-export function LogoPaulinho() {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginBottom: '6px' }}>
-        <div style={{ width: '8px', height: '38px', borderRadius: '4px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '14px', left: '-4px' }}></div>
-        </div>
-        <div style={{ width: '8px', height: '38px', borderRadius: '4px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '6px', left: '-4px' }}></div>
-        </div>
-        <div style={{ width: '8px', height: '38px', borderRadius: '4px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '18px', left: '-4px' }}></div>
-        </div>
-        <div style={{ width: '8px', height: '38px', borderRadius: '4px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '8px', left: '-4px' }}></div>
-        </div>
-        <div style={{ width: '8px', height: '38px', borderRadius: '4px', background: 'linear-gradient(180deg, #001f54 0%, #00b4d8 100%)', position: 'relative' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '50%', border: '2px solid #000', backgroundColor: '#fff', position: 'absolute', top: '22px', left: '-4px' }}></div>
-        </div>
-      </div>
-
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ color: '#0f172a', fontWeight: '900', fontSize: '16px', letterSpacing: '2.5px', lineHeight: '1.1' }}>
-          PAULINHO
-        </div>
-        <div style={{ color: '#0f172a', fontWeight: '900', fontSize: '14px', letterSpacing: '2px', lineHeight: '1.1', marginTop: '1px' }}>
-          PRODUÇÕES
-        </div>
-        <div style={{ color: '#0284c7', fontSize: '7.5px', fontWeight: 'bold', letterSpacing: '1.5px', marginTop: '3px' }}>
-          TECNOLOGIA E ESTRUTURA
-        </div>
-      </div>
-    </div>
-  );
-}
+import { Logo } from '../Logo';
+import { BarcodeReader } from '../BarcodeReader';
 
 export function Dashboard() {
   const [abaAtiva, setAbaAtiva] = useState('resumo');
@@ -77,7 +42,6 @@ export function Dashboard() {
 
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState('');
-  const videoRef = useRef(null);
 
   // Trava para evitar leituras duplas simultâneas (debounce/lock)
   const isProcessingRef = useRef(false);
@@ -98,38 +62,10 @@ export function Dashboard() {
     carregarDados();
   }, []);
 
-  // Leitor de Câmera ZXing com trava de debounce
-  useEffect(() => {
-    let controls = null;
-
-    if (abaAtiva === 'equipamentos' && passoScan === 1 && usarCamera && videoRef.current) {
-      const codeReader = new BrowserMultiFormatReader();
-
-      codeReader
-        .decodeFromVideoDevice(undefined, videoRef.current, (result) => {
-          if (result && !isProcessingRef.current) {
-            const cod = result.getText();
-            processarCodigoScaneado(cod);
-          }
-        })
-        .then((c) => {
-          controls = c;
-        })
-        .catch((err) => console.error('Erro na câmera:', err));
-    }
-
-    return () => {
-      if (controls) {
-        controls.stop();
-      }
-      if (videoRef.current && videoRef.current.srcObject) {
-        try {
-          const stream = videoRef.current.srcObject;
-          stream.getTracks().forEach((track) => track.stop());
-        } catch (e) {}
-      }
-    };
-  }, [abaAtiva, passoScan, usarCamera]);
+  function handleCodigoLidoCamera(codigo) {
+    if (isProcessingRef.current) return;
+    processarCodigoScaneado(codigo);
+  }
 
   function obterStatusCalculado(evento) {
     if (evento.status === 'finalizado') return 'finalizado';
@@ -331,7 +267,7 @@ export function Dashboard() {
       {/* Cabeçalho */}
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: '20px', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <LogoPaulinho />
+          <Logo tamanho="pequena" />
           <div style={{ borderLeft: '2px solid #e2e8f0', paddingLeft: '16px' }}>
             <h1 style={{ fontSize: '22px', fontWeight: '700', margin: 0, color: '#0f172a', lineHeight: '1.2' }}>Painel do Gestor</h1>
             <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#64748b' }}>Gestão de estoque e eventos</p>
@@ -510,7 +446,7 @@ export function Dashboard() {
 
                 {usarCamera && (
                   <div style={{ marginBottom: '20px', padding: '10px', border: '2px dashed #0284c7', borderRadius: '8px', backgroundColor: '#f8fafc', textAlign: 'center' }}>
-                    <video ref={videoRef} style={{ width: '100%', maxWidth: '400px', borderRadius: '6px' }} />
+                    <BarcodeReader onScanSuccess={handleCodigoLidoCamera} mostrarTitulo={false} />
                     <p style={{ fontSize: '12px', color: '#0284c7', margin: '8px 0 0 0', fontWeight: 'bold' }}>
                       Centralize o código de barras ou QR na câmera
                     </p>
