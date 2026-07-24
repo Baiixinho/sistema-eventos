@@ -26,6 +26,7 @@ export function Dashboard() {
     cliente: '',
     data_inicio: '',
   });
+  const [eventoEditando, setEventoEditando] = useState(null);
 
   // Fluxo Scan First
   const [passoScan, setPassoScan] = useState(1); // 1: Ler Câmera, 2: Escolher Tipo/Preencher
@@ -473,6 +474,43 @@ export function Dashboard() {
     carregarDados();
   }
 
+  function abrirEdicaoEvento(ev) {
+    setMensagem('');
+    setEventoEditando({
+      id: ev.id,
+      nome: ev.nome,
+      cliente: ev.cliente || '',
+      data_inicio: ev.data_inicio || '',
+    });
+  }
+
+  async function handleSalvarEdicaoEvento(e) {
+    e.preventDefault();
+    if (!eventoEditando.nome.trim() || !eventoEditando.data_inicio) return;
+
+    setCarregando(true);
+
+    const { error } = await supabase
+      .from('eventos')
+      .update({
+        nome: eventoEditando.nome.trim(),
+        cliente: eventoEditando.cliente.trim(),
+        data_inicio: eventoEditando.data_inicio,
+      })
+      .eq('id', eventoEditando.id);
+
+    setCarregando(false);
+
+    if (!error) {
+      setMensagem('Evento atualizado com sucesso!');
+      setEventoEditando(null);
+      carregarDados();
+    } else {
+      console.error('Erro ao atualizar evento no Supabase:', error);
+      setMensagem('Erro ao atualizar o evento.');
+    }
+  }
+
   const equipamentosDoCaseAtual = caseEmAcondicionamento
     ? equipamentos.filter((eq) => eq.case_id === caseEmAcondicionamento.id)
     : [];
@@ -590,6 +628,44 @@ export function Dashboard() {
             </form>
           </div>
 
+          {eventoEditando && (
+            <div style={{ padding: '16px', backgroundColor: '#fffbeb', border: '2px solid #d97706', borderRadius: '10px' }}>
+              <h4 style={{ margin: '0 0 12px 0', color: '#92400e', fontSize: '15px' }}>
+                ✏️ Editando: {eventoEditando.nome}
+              </h4>
+              <form onSubmit={handleSalvarEdicaoEvento} style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  placeholder="Nome do Evento"
+                  value={eventoEditando.nome}
+                  onChange={(e) => setEventoEditando({ ...eventoEditando, nome: e.target.value })}
+                  style={{ flex: '2 1 200px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Cliente / Contratante"
+                  value={eventoEditando.cliente}
+                  onChange={(e) => setEventoEditando({ ...eventoEditando, cliente: e.target.value })}
+                  style={{ flex: '1 1 150px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                />
+                <input
+                  type="date"
+                  value={eventoEditando.data_inicio}
+                  onChange={(e) => setEventoEditando({ ...eventoEditando, data_inicio: e.target.value })}
+                  style={{ flex: '1 1 140px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  required
+                />
+                <button type="submit" disabled={carregando} style={{ backgroundColor: '#d97706', color: 'white', padding: '10px 20px', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+                  {carregando ? 'Salvando...' : 'Salvar'}
+                </button>
+                <button type="button" onClick={() => setEventoEditando(null)} style={{ backgroundColor: '#f1f5f9', color: '#475569', padding: '10px 20px', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>
+                  Cancelar
+                </button>
+              </form>
+            </div>
+          )}
+
           <div>
             <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>Eventos Cadastrados</h3>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -628,7 +704,11 @@ export function Dashboard() {
                           <span style={{ fontSize: '11px', fontWeight: '700', padding: '3px 8px', borderRadius: '4px', backgroundColor: cor.bg, color: cor.text, border: `1px solid ${cor.border}` }}>
                             {LABELS_STATUS[statusCalculado]}
                           </span>
-                          {ev.data_inicio && <span style={{ fontSize: '12px', color: '#64748b' }}>Data: {new Date(ev.data_inicio + 'T00:00:00').toLocaleDateString('pt-BR')}</span>}
+                          {ev.data_inicio ? (
+                            <span style={{ fontSize: '12px', color: '#64748b' }}>Data: {new Date(ev.data_inicio + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
+                          ) : (
+                            <span style={{ fontSize: '12px', color: '#b45309', fontWeight: '600' }}>⚠️ Sem data definida</span>
+                          )}
                           {equipamentosDoEvento.length > 0 && (
                             <span style={{ fontSize: '11px', backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
                               🔌 {equipamentosDoEvento.length} {equipamentosDoEvento.length === 1 ? 'equipamento' : 'equipamentos'} {expandido ? '▲' : '▾'}
@@ -636,15 +716,26 @@ export function Dashboard() {
                           )}
                         </div>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleStatusEvento(ev.id, ev.status);
-                        }}
-                        style={{ padding: '8px 14px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', backgroundColor: ev.status === 'finalizado' ? '#f0f9ff' : '#fef2f2', color: ev.status === 'finalizado' ? '#0284c7' : '#dc2626' }}
-                      >
-                        {ev.status === 'finalizado' ? 'Reativar Evento' : 'Encerrar Evento'}
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            abrirEdicaoEvento(ev);
+                          }}
+                          style={{ padding: '8px 14px', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', backgroundColor: '#f1f5f9', color: '#475569' }}
+                        >
+                          ✏️ Editar
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleStatusEvento(ev.id, ev.status);
+                          }}
+                          style={{ padding: '8px 14px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600', backgroundColor: ev.status === 'finalizado' ? '#f0f9ff' : '#fef2f2', color: ev.status === 'finalizado' ? '#0284c7' : '#dc2626' }}
+                        >
+                          {ev.status === 'finalizado' ? 'Reativar Evento' : 'Encerrar Evento'}
+                        </button>
+                      </div>
                     </div>
 
                     {expandido && equipamentosDoEvento.length > 0 && (
