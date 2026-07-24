@@ -43,6 +43,9 @@ export function Dashboard() {
   const [carregando, setCarregando] = useState(false);
   const [mensagem, setMensagem] = useState('');
 
+  // Edição de item já cadastrado
+  const [itemEditando, setItemEditando] = useState(null);
+
   // Trava para evitar leituras duplas simultâneas (debounce/lock)
   const isProcessingRef = useRef(false);
 
@@ -133,16 +136,33 @@ export function Dashboard() {
     }
   }
 
+  function iniciarCadastroEquipamento() {
+    setMensagem('');
+    setAbaAtiva('equipamentos');
+    setCaseEmAcondicionamento(null);
+    setPassoScan(1);
+    setUsarCamera(true);
+  }
+
   // Lógica de Processamento do Código de Barras
   function processarCodigoScaneado(codigo) {
     if (isProcessingRef.current) return;
-    
+
     // Limpa espaços, caracteres de nova linha (Enter do leitor) e símbolos invisíveis
     const codLimpo = codigo ? codigo.trim().replace(/[\r\n]+/g, '') : '';
     if (!codLimpo) return;
 
     // Ativa a trava de leitura
     isProcessingRef.current = true;
+
+    // Código de barras deve ter exatamente 5 dígitos numéricos
+    if (!/^\d{5}$/.test(codLimpo)) {
+      setMensagem(`⚠️ Código inválido: "${codLimpo}". O código de barras deve ter exatamente 5 dígitos.`);
+      setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 1500);
+      return;
+    }
 
     const listaEquipamentos = equipamentosRef.current;
     const currentCase = caseRef.current;
@@ -252,6 +272,44 @@ export function Dashboard() {
     }
   }
 
+  function abrirEdicao(eq) {
+    setMensagem('');
+    setItemEditando({
+      id: eq.id,
+      nome: eq.nome,
+      status: eq.status,
+      case_id: eq.case_id || '',
+      tipo: eq.tipo,
+    });
+  }
+
+  async function handleSalvarEdicao(e) {
+    e.preventDefault();
+    if (!itemEditando.nome.trim()) return;
+
+    setCarregando(true);
+
+    const { error } = await supabase
+      .from('equipamentos')
+      .update({
+        nome: itemEditando.nome.trim(),
+        status: itemEditando.status,
+        case_id: itemEditando.tipo === 'Equipamento' && itemEditando.case_id ? itemEditando.case_id : null,
+      })
+      .eq('id', itemEditando.id);
+
+    setCarregando(false);
+
+    if (!error) {
+      setMensagem('Item atualizado com sucesso!');
+      setItemEditando(null);
+      carregarDados();
+    } else {
+      console.error('Erro ao atualizar no Supabase:', error);
+      setMensagem('Erro ao atualizar o item.');
+    }
+  }
+
   async function toggleStatusEvento(id, statusAtual) {
     const novoStatus = statusAtual === 'finalizado' ? 'ativo' : 'finalizado';
     await supabase.from('eventos').update({ status: novoStatus }).eq('id', id);
@@ -315,7 +373,15 @@ export function Dashboard() {
 
       {/* ABA 1: RESUMO */}
       {abaAtiva === 'resumo' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <button
+            onClick={iniciarCadastroEquipamento}
+            style={{ backgroundColor: '#0284c7', color: 'white', padding: '18px', fontSize: '16px', fontWeight: 'bold', border: 'none', borderRadius: '10px', cursor: 'pointer' }}
+          >
+            📷 + Cadastrar Equipamento
+          </button>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '16px' }}>
           <div style={{ padding: '20px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
             <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '500' }}>Total Equipamentos</span>
             <p style={{ fontSize: '30px', fontWeight: '700', margin: '8px 0 0 0', color: '#0f172a' }}>{estatisticas.total}</p>
@@ -335,6 +401,7 @@ export function Dashboard() {
           <div style={{ padding: '20px', backgroundColor: '#fffbeb', border: '1px solid #fef08a', borderRadius: '10px' }}>
             <span style={{ fontSize: '13px', color: '#854d0e', fontWeight: '500' }}>Programados</span>
             <p style={{ fontSize: '30px', fontWeight: '700', margin: '8px 0 0 0', color: '#ca8a04' }}>{estatisticas.eventosProgramados}</p>
+          </div>
           </div>
         </div>
       )}
@@ -547,6 +614,83 @@ export function Dashboard() {
             )}
           </div>
 
+          {/* PAINEL DE EDIÇÃO DE ITEM EXISTENTE */}
+          {itemEditando && (
+            <div style={{ padding: '16px', backgroundColor: '#fffbeb', border: '2px solid #d97706', borderRadius: '10px' }}>
+              <h4 style={{ margin: '0 0 12px 0', color: '#92400e', fontSize: '15px' }}>
+                ✏️ Editando: #{itemEditando.nome}
+              </h4>
+              <form onSubmit={handleSalvarEdicao} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>
+                    Nome / Descrição
+                  </label>
+                  <input
+                    type="text"
+                    value={itemEditando.nome}
+                    onChange={(e) => setItemEditando({ ...itemEditando, nome: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', boxSizing: 'border-box' }}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>
+                    Status
+                  </label>
+                  <select
+                    value={itemEditando.status}
+                    onChange={(e) => setItemEditando({ ...itemEditando, status: e.target.value })}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  >
+                    <option value="Disponível">Disponível</option>
+                    <option value="Em Uso">Em Uso</option>
+                    <option value="Em Manutenção">Em Manutenção</option>
+                  </select>
+                </div>
+
+                {itemEditando.tipo === 'Equipamento' && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#475569', marginBottom: '6px' }}>
+                      Case
+                    </label>
+                    <select
+                      value={itemEditando.case_id}
+                      onChange={(e) => setItemEditando({ ...itemEditando, case_id: e.target.value })}
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                    >
+                      <option value="">Nenhum (avulso)</option>
+                      {equipamentos
+                        .filter((c) => c.tipo === 'Case' && c.id !== itemEditando.id)
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.nome} (#{c.patrimonio})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                  <button
+                    type="submit"
+                    disabled={carregando}
+                    style={{ flex: 1, backgroundColor: '#d97706', color: 'white', padding: '12px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+                  >
+                    {carregando ? 'Salvando...' : 'Salvar Alterações'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setItemEditando(null)}
+                    style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
           {/* LISTA DE ESTOQUE CADASTRADO */}
           <div>
             <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
@@ -555,6 +699,12 @@ export function Dashboard() {
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {equipamentos.map((eq) => {
                 const casePai = eq.case_id ? equipamentos.find((c) => c.id === eq.case_id) : null;
+                const corStatus =
+                  eq.status === 'Disponível'
+                    ? { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }
+                    : eq.status === 'Em Manutenção'
+                    ? { bg: '#fffbeb', text: '#92400e', border: '#fde68a' }
+                    : { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' };
 
                 return (
                   <li key={eq.id} style={{ padding: '12px 16px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -570,10 +720,16 @@ export function Dashboard() {
                         {casePai && <span style={{ color: '#0284c7', fontWeight: '500' }}>🧳 Acondicionado em: {casePai.nome}</span>}
                       </div>
                     </div>
-                    <div>
-                      <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: eq.status === 'Disponível' ? '#f0fdf4' : '#fef2f2', color: eq.status === 'Disponível' ? '#166534' : '#991b1b', border: eq.status === 'Disponível' ? '1px solid #bbf7d0' : '1px solid #fecaca', fontWeight: '600' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: corStatus.bg, color: corStatus.text, border: `1px solid ${corStatus.border}`, fontWeight: '600' }}>
                         {eq.status}
                       </span>
+                      <button
+                        onClick={() => abrirEdicao(eq)}
+                        style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer' }}
+                      >
+                        ✏️ Editar
+                      </button>
                     </div>
                   </li>
                 );
