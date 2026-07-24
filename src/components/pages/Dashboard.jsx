@@ -151,6 +151,8 @@ export function Dashboard() {
 
   function renderLinhaEstoque(eq, aninhado = false) {
     const eventoAtual = eq.status === 'Em Uso' ? obterEventoAtual(eq.id) : null;
+    const filhos = !aninhado && eq.tipo === 'Case' ? equipamentos.filter((c) => c.case_id === eq.id) : [];
+    const temExpansao = !!eventoAtual || filhos.length > 0;
     const expandido = itensExpandidos.has(eq.id);
     const corStatus =
       eq.status === 'Disponível'
@@ -160,7 +162,10 @@ export function Dashboard() {
         : { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' };
 
     return (
-      <div style={{ padding: aninhado ? '8px 12px' : '12px 16px', backgroundColor: aninhado ? '#f8fafc' : '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+      <div
+        onClick={() => temExpansao && toggleExpandido(eq.id)}
+        style={{ padding: aninhado ? '8px 12px' : '12px 16px', backgroundColor: aninhado ? '#f8fafc' : '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', cursor: temExpansao ? 'pointer' : 'default' }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
             <span style={{ fontSize: '13px' }}>{eq.tipo === 'Case' ? '🧳' : '🔌'}</span>
@@ -168,21 +173,26 @@ export function Dashboard() {
             <span style={{ fontSize: '11px', backgroundColor: '#f1f5f9', color: '#475569', padding: '2px 6px', borderRadius: '4px', border: '1px solid #cbd5e1' }}>
               #{eq.patrimonio || eq.codigo_barras}
             </span>
+            {filhos.length > 0 && (
+              <span style={{ fontSize: '11px', backgroundColor: '#e0f2fe', color: '#0369a1', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
+                {filhos.length} {filhos.length === 1 ? 'item' : 'itens'}
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: corStatus.bg, color: corStatus.text, border: `1px solid ${corStatus.border}`, fontWeight: '600' }}>
               {eq.status}
             </span>
-            {eventoAtual && (
-              <button
-                onClick={() => toggleExpandido(eq.id)}
-                style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', cursor: 'pointer' }}
-              >
+            {temExpansao && (
+              <span style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>
                 {expandido ? '▲' : '▾'}
-              </button>
+              </span>
             )}
             <button
-              onClick={() => abrirEdicao(eq)}
+              onClick={(e) => {
+                e.stopPropagation();
+                abrirEdicao(eq);
+              }}
               style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '6px', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', fontWeight: '600', cursor: 'pointer' }}
             >
               ✏️ Editar
@@ -194,6 +204,19 @@ export function Dashboard() {
           <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0', fontSize: '12px', color: '#b91c1c', fontWeight: '500' }}>
             📍 Em uso no evento: {eventoAtual}
           </div>
+        )}
+
+        {expandido && filhos.length > 0 && (
+          <ul
+            onClick={(e) => e.stopPropagation()}
+            style={{ listStyle: 'none', margin: '10px 0 0 0', padding: '10px 0 0 12px', borderTop: '1px dashed #e2e8f0', borderLeft: '2px solid #bae6fd' }}
+          >
+            {filhos.map((filho) => (
+              <li key={filho.id} style={{ marginBottom: '6px' }}>
+                {renderLinhaEstoque(filho, true)}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     );
@@ -887,24 +910,11 @@ export function Dashboard() {
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {equipamentos
                 .filter((eq) => !eq.case_id)
-                .map((eq) => {
-                  const filhos = eq.tipo === 'Case' ? equipamentos.filter((c) => c.case_id === eq.id) : [];
-
-                  return (
-                    <li key={eq.id} style={{ marginBottom: '8px' }}>
-                      {renderLinhaEstoque(eq)}
-                      {filhos.length > 0 && (
-                        <ul style={{ listStyle: 'none', margin: '6px 0 0 18px', padding: '0 0 0 12px', borderLeft: '2px solid #bae6fd' }}>
-                          {filhos.map((filho) => (
-                            <li key={filho.id} style={{ marginBottom: '6px' }}>
-                              {renderLinhaEstoque(filho, true)}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  );
-                })}
+                .map((eq) => (
+                  <li key={eq.id} style={{ marginBottom: '8px' }}>
+                    {renderLinhaEstoque(eq)}
+                  </li>
+                ))}
             </ul>
           </div>
         </div>
