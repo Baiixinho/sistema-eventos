@@ -18,6 +18,7 @@ export function Dashboard() {
   // Listas
   const [eventos, setEventos] = useState([]);
   const [equipamentos, setEquipamentos] = useState([]);
+  const [movimentacoes, setMovimentacoes] = useState([]);
 
   // Form Eventos
   const [novoEvento, setNovoEvento] = useState({
@@ -45,6 +46,10 @@ export function Dashboard() {
 
   // Edição de item já cadastrado
   const [itemEditando, setItemEditando] = useState(null);
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  const [pinExclusao, setPinExclusao] = useState('');
+
+  const PIN_CONFIRMACAO_EXCLUSAO = '9999';
 
   // Trava para evitar leituras duplas simultâneas (debounce/lock)
   const isProcessingRef = useRef(false);
@@ -111,7 +116,22 @@ export function Dashboard() {
       }));
     }
 
+    const { data: movData } = await supabase
+      .from('movimentacoes')
+      .select('*')
+      .order('data_hora', { ascending: false });
+
+    if (movData) {
+      setMovimentacoes(movData);
+    }
+
     setCarregando(false);
+  }
+
+  // Para cada equipamento "Em Uso", descobre o evento da última saída registrada
+  function obterEventoAtual(equipamentoId) {
+    const ultimaMovimentacao = movimentacoes.find((m) => m.equipamento_id === equipamentoId);
+    return ultimaMovimentacao && ultimaMovimentacao.tipo === 'saida' ? ultimaMovimentacao.evento : null;
   }
 
   async function handleCriarEvento(e) {
@@ -274,6 +294,8 @@ export function Dashboard() {
 
   function abrirEdicao(eq) {
     setMensagem('');
+    setConfirmandoExclusao(false);
+    setPinExclusao('');
     setItemEditando({
       id: eq.id,
       nome: eq.nome,
@@ -281,6 +303,41 @@ export function Dashboard() {
       case_id: eq.case_id || '',
       tipo: eq.tipo,
     });
+  }
+
+  function fecharEdicao() {
+    setItemEditando(null);
+    setConfirmandoExclusao(false);
+    setPinExclusao('');
+  }
+
+  async function handleExcluirItem() {
+    if (pinExclusao !== PIN_CONFIRMACAO_EXCLUSAO) {
+      setMensagem('⚠️ PIN incorreto. Exclusão cancelada.');
+      return;
+    }
+
+    setCarregando(true);
+
+    if (itemEditando.tipo === 'Case') {
+      await supabase.from('equipamentos').update({ case_id: null }).eq('case_id', itemEditando.id);
+    }
+
+    const { error } = await supabase.from('equipamentos').delete().eq('id', itemEditando.id);
+
+    setCarregando(false);
+
+    if (!error) {
+      setMensagem(`"${itemEditando.nome}" excluído com sucesso.`);
+      if (caseEmAcondicionamento && caseEmAcondicionamento.id === itemEditando.id) {
+        setCaseEmAcondicionamento(null);
+      }
+      fecharEdicao();
+      carregarDados();
+    } else {
+      console.error('Erro ao excluir no Supabase:', error);
+      setMensagem('Erro ao excluir o item.');
+    }
   }
 
   async function handleSalvarEdicao(e) {
@@ -341,6 +398,7 @@ export function Dashboard() {
           { id: 'resumo', label: '📊 Visão Geral' },
           { id: 'eventos', label: '📅 Eventos' },
           { id: 'equipamentos', label: '📦 Cadastro & Leitor' },
+          { id: 'historico', label: '🕓 Histórico' },
         ].map((aba) => (
           <button
             key={aba.id}
@@ -681,13 +739,60 @@ export function Dashboard() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setItemEditando(null)}
+                    onClick={fecharEdicao}
                     style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: 'bold', fontSize: '14px', cursor: 'pointer' }}
                   >
                     Cancelar
                   </button>
                 </div>
               </form>
+
+              {!confirmandoExclusao ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmandoExclusao(true)}
+                  style={{ width: '100%', marginTop: '12px', backgroundColor: 'transparent', color: '#dc2626', padding: '10px', border: '1px solid #fca5a5', borderRadius: '6px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
+                >
+                  🗑️ Excluir {itemEditando.tipo === 'Case' ? 'Case' : 'Equipamento'}
+                </button>
+              ) : (
+                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px' }}>
+                  <p style={{ margin: '0 0 10px 0', fontSize: '13px', color: '#991b1b', fontWeight: '600' }}>
+                    {itemEditando.tipo === 'Case'
+                      ? 'Os itens dentro deste Case ficarão avulsos. Digite o PIN do gestor para confirmar a exclusão:'
+                      : 'Digite o PIN do gestor para confirmar a exclusão:'}
+                  </p>
+                  <input
+                    type="password"
+                    maxLength="6"
+                    value={pinExclusao}
+                    onChange={(e) => setPinExclusao(e.target.value)}
+                    placeholder="PIN"
+                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #fca5a5', fontSize: '15px', textAlign: 'center', letterSpacing: '4px', boxSizing: 'border-box', marginBottom: '10px' }}
+                    autoFocus
+                  />
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={handleExcluirItem}
+                      disabled={carregando}
+                      style={{ flex: 1, backgroundColor: '#dc2626', color: 'white', padding: '10px', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
+                    >
+                      {carregando ? 'Excluindo...' : 'Confirmar Exclusão'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmandoExclusao(false);
+                        setPinExclusao('');
+                      }}
+                      style={{ flex: 1, backgroundColor: '#f1f5f9', color: '#475569', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -699,6 +804,7 @@ export function Dashboard() {
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {equipamentos.map((eq) => {
                 const casePai = eq.case_id ? equipamentos.find((c) => c.id === eq.case_id) : null;
+                const eventoAtual = eq.status === 'Em Uso' ? obterEventoAtual(eq.id) : null;
                 const corStatus =
                   eq.status === 'Disponível'
                     ? { bg: '#f0fdf4', text: '#166534', border: '#bbf7d0' }
@@ -718,6 +824,7 @@ export function Dashboard() {
                       </div>
                       <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
                         {casePai && <span style={{ color: '#0284c7', fontWeight: '500' }}>🧳 Acondicionado em: {casePai.nome}</span>}
+                        {eventoAtual && <span style={{ color: '#b91c1c', fontWeight: '500' }}>📍 Em uso no evento: {eventoAtual}</span>}
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -736,6 +843,49 @@ export function Dashboard() {
               })}
             </ul>
           </div>
+        </div>
+      )}
+
+      {/* ABA 4: HISTÓRICO */}
+      {abaAtiva === 'historico' && (
+        <div>
+          <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', fontWeight: '600', color: '#0f172a' }}>
+            Histórico de Movimentações ({movimentacoes.length})
+          </h3>
+          {movimentacoes.length === 0 ? (
+            <p style={{ color: '#64748b', fontSize: '14px' }}>Nenhuma movimentação registrada ainda.</p>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {movimentacoes.map((mov) => {
+                const equipamento = equipamentos.find((eq) => eq.id === mov.equipamento_id);
+                const infoTipo =
+                  mov.tipo === 'saida'
+                    ? { label: '🔴 Saída', color: '#991b1b' }
+                    : mov.tipo === 'entrada'
+                    ? { label: '🟢 Entrada', color: '#166534' }
+                    : { label: '🗑️ Removido do lote', color: '#64748b' };
+
+                return (
+                  <li key={mov.id} style={{ padding: '12px 16px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <div>
+                      <strong style={{ fontSize: '14px', color: '#0f172a' }}>
+                        {equipamento ? equipamento.nome : 'Equipamento removido'}
+                      </strong>
+                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                        Evento: {mov.evento || '—'}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ fontSize: '13px', fontWeight: '600', color: infoTipo.color }}>{infoTipo.label}</span>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+                        {new Date(mov.data_hora).toLocaleString('pt-BR')}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
     </div>
